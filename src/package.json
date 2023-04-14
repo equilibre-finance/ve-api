@@ -1,0 +1,17 @@
+{
+  "name": "voter-distro-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "bignumber.js": "^9.1.1",
+    "chalk": "1.1.3",
+    "dotenv": "^16.0.3",
+    "ethereumjs-tx": "^2.1.2",
+    "ethers": "^5.7.2",
+    "express": "^4.18.2",
+    "markdown-to-html-cli": "^3.5.3",
+    "web3": "^1.8.1",
+    "web3-eth-accounts": "^1.8.1"
+  }
+}
