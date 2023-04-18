@@ -11,6 +11,7 @@
     "ethers": "^5.7.2",
     "express": "^4.18.2",
     "markdown-to-html-cli": "^3.5.3",
+    "moment": "^2.29.4",
     "web3": "^1.8.1",
     "web3-eth-accounts": "^1.8.1"
   }

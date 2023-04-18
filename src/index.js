@@ -1,10 +1,10 @@
 'use strict';
+const moment = require('moment')
 const express = require('express')
 const Web3 = require('web3');
 require('dotenv').config({path: '.env'});
 const web3 = new Web3(process.env.RPC);
 const fs = require('fs');
-const { md } = import('markdown-to-html-cli');
 
 process.on('uncaughtException', function (err) {
     console.error('[uncaughtException]', err);
@@ -16,10 +16,9 @@ require('events').EventEmitter.defaultMaxListeners = 0;
 
 const votingEscrowContract = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
 const bribeContract = '0xc401adf58F18AF7fD1bf88d5a29a203d3B3783B2';
-const minAmount = 165;
 
 let info = [], totalVARA = 0, totalVE = 0;
-let allData = [], veLockersJSON = [];
+let allData = [];
 const abi = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
 const votingEscrow = new web3.eth.Contract(abi, votingEscrowContract);
 
@@ -56,28 +55,37 @@ async function onEventData( events ){
         if (days === 0) continue;
         const date = new Date(u.ts*1000).toISOString();
         const line = `|${u.provider}|${parseFloat(amount).toFixed(2)}|${parseFloat(ve).toFixed(2)}|${days}|${date}|`;
-        if (u.ts > config.epochEnd ) {
-            console.log(` STOP: locktime=${locktime} epochEnd=${config.epochEnd}`);
-            endProcessing = true;
+        const tr = `<tr><td>${u.provider}</td><td>${parseFloat(amount).toFixed(2)}</td><td>${parseFloat(ve).toFixed(2)}</td><td>${days}</td><td>${date}</td></tr>`;
+        if (u.ts < config.epochStart ) {
+            console.log(` IGNORE: ts=${u.ts} < epochStart=${config.epochStart}`);
             break;
         }
         totalVARA += amount;
         totalVE += ve;
         console.log(line);
-        info.push(line);
+        info.push(tr);
         allData.push({address: u.provider, amount: amount, ve: ve, days: days, date: date});
     }
 }
 
-let endProcessing = false;
+let endProcessing = false, running = false;
 let config, home;
 async function scanBlockchain() {
-    let size = config.debug ? 1 : 1000
+    if( running ){
+        console.log(`scanBlockchain: already running, waiting next interaction...`);
+        return;
+    }
+    running = true;
+    let size =  1000
+    const blocks = config.startBlockNumber + size;
+    console.log(` - size=${size} blocks=${blocks}`)
+    if( blocks > config.endBlockNumber ){
+        size = config.endBlockNumber - config.startBlockNumber;
+        console.log(` -- resize to ${size}`)
+    }
+    console.log(`- scan: ${config.startBlockNumber-1}->${config.endBlockNumber} size=${size}`)
 
-    info.push(`|Address|Vara|veVara|Days|Date|`);
-    info.push(`|:---|---:|---:|---:|---:|`);
-
-    for (let i = config.startBlockNumber; i < config.endBlockNumber; i += size) {
+    for (let i = config.startBlockNumber-1; i < config.endBlockNumber; i += size) {
         if( endProcessing ) break;
         const args = {fromBlock: i, toBlock: i + size};
         try {
@@ -88,42 +96,64 @@ async function scanBlockchain() {
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    const TOTAL = `# Totals:\n\n- VARA ${totalVARA}\n- veVARA ${totalVE}\n\n`;
+    const TOTAL = `# - VARA ${totalVARA} - veVARA ${totalVE} - total: ${allData.length}`;
     console.log(TOTAL);
-    info = prepend(TOTAL, info);
-    home = md( {markdown: info.join('\n')} );
-    veLockersJSON = allData;
+    running = false;
 }
 
-async function getBlocksFromLastEpoch(block) {
-    const latest = await web3.eth.getBlock("latest");
-    const epochStart = parseInt(latest.timestamp);
-    const epochEnd = parseInt((await bribe.methods.getEpochStart(latest.timestamp).call()).toString());
-    const blocksBehind = parseInt((latest.timestamp - epochEnd) / 6.4);
-    const startBlockNumber = latest.number - blocksBehind;
-    const endBlockNumber = latest.number;
-    config = {
-        epochStart: epochStart,
-        epochEnd: epochEnd,
-        startBlockNumber: startBlockNumber,
-        endBlockNumber: endBlockNumber
-    };
-    if( block ){
-        config.debug = true;
-        config.startBlockNumber = block;
-        config.endBlockNumber = block+1;
+async function getStartBlock() {
+    try {
+        const latest = await web3.eth.getBlock("latest");
+        const block = parseInt(latest.number) - 1;
+        const epochStart = parseInt((await bribe.methods.getEpochStart(latest.timestamp).call()).toString());
+        if (config) {
+            if( epochStart != config.epochStart ){
+                console.log(`getStartBlock: epoch changed, resetting data.`)
+                // reset the epoch data
+                totalVARA += 0;
+                totalVE += 0;
+                info = [];
+                allData = [];
+            }
+            const lastScannedBlock = config.endBlockNumber;
+            config = {
+                startBlockNumber: lastScannedBlock,
+                endBlockNumber: block,
+                epochStart: epochStart,
+                epochEnd: parseInt(latest.timestamp),
+                blocksDiff: block - lastScannedBlock
+            };
+        } else {
+            const blocksBehind = parseInt((latest.timestamp - epochStart) / 6.4);
+            const startBlockNumber = block - blocksBehind;
+            config = {
+                epochStart: epochStart,
+                epochEnd: parseInt(latest.timestamp),
+                startBlockNumber: startBlockNumber,
+                endBlockNumber: block,
+                blocksDiff: block - startBlockNumber
+            };
+        }
+
+        const seconds = config.epochEnd - config.epochStart;
+        console.log(`Scan ${config.blocksDiff} blocks, since ${getTimeStr(seconds)}.`);
+        return true;
+    }catch(e){
+        console.log(`getStartBlock: STOP ${e.toString()}`);
     }
+    return false;
 }
-
-function prepend(value, array) {
-    let newArray = array.slice();
-    newArray.unshift(value);
-    return newArray;
+function getTimeStr(seconds) {
+    const duration = moment.duration(seconds, 'seconds');
+    return duration.humanize();
 }
 
 async function exec(){
-    const block = 0;
-    await getBlocksFromLastEpoch(block);
+    const status = await getStartBlock();
+    if( ! status ){
+        console.log(`exec: STOP error loading block interval. Waiting next interaction.`)
+        return;
+    }
     try {
         await scanBlockchain();
     } catch (e) {
@@ -131,16 +161,24 @@ async function exec(){
     }
 }
 
+const ONE_MINUTE = 60 * 1000;
+const ONE_HOUR = 60 * ONE_MINUTE;
 async function main() {
     const app = express()
     const port = process.env.HTTP_PORT
 
     app.get('/', (req, res) => {
-        res.send(home)
+        const TOTAL = `<h1>Totals: - VARA ${totalVARA} - veVARA ${totalVE}</h1>`;
+        let stats = [];
+        stats.push(TOTAL);
+        stats.push(`<table border width="100%"><tr><td>Address</td><td>Vara</td><td>veVara</td><td>Days</td><td>Date</td></tr>`);
+        stats = stats.concat(info);
+        stats.push(`</table>`)
+        res.send(stats.join('\n'))
     })
 
     app.get('/api/v1/weekly-ve-lockers', (req, res) => {
-        res.json( veLockersJSON );
+        res.json( allData );
     })
 
     app.listen(port, () => {
@@ -148,8 +186,9 @@ async function main() {
     })
 
     console.log(`- RPC: ${process.env.RPC}`);
+
     await exec();
-    setInterval(exec, 60 * 60 * 1000 );
+    setInterval(exec, ONE_MINUTE );
 }
 
 main();

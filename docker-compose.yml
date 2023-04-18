@@ -1,10 +1,12 @@
 version: '3'
 
 services:
-  voter-distro:
+  voter-lockers:
     build:
       context: .
       dockerfile: Dockerfile
     image: nodejs
-    container_name: voter-distro
+    container_name: voter-lockers
     restart: unless-stopped
+    expose:
+      - 8381:8381
