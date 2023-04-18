@@ -83,11 +83,16 @@ async function scanBlockchain() {
         size = config.endBlockNumber - config.startBlockNumber;
         console.log(` -- resize to ${size}`)
     }
-    console.log(`- scan: ${config.startBlockNumber-1}->${config.endBlockNumber} size=${size}`)
+    console.log(`- scan: ${config.startBlockNumber+1}->${config.endBlockNumber} size=${size}`)
 
-    for (let i = config.startBlockNumber-1; i < config.endBlockNumber; i += size) {
+    const latest = await web3.eth.getBlock("latest");
+    const block = parseInt(latest.number);
+
+    for (let i = config.startBlockNumber+1; i < config.endBlockNumber; i += size) {
         if( endProcessing ) break;
-        const args = {fromBlock: i, toBlock: i + size};
+        let args = {fromBlock: i, toBlock: i + size};
+        if( args.toBlock > block )
+            args.toBlock = args.toBlock--;
         try {
             const r = await votingEscrow.getPastEvents(args);
             await onEventData(r);
@@ -104,7 +109,7 @@ async function scanBlockchain() {
 async function getStartBlock() {
     try {
         const latest = await web3.eth.getBlock("latest");
-        const block = parseInt(latest.number) - 1;
+        const block = parseInt(latest.number);
         const epochStart = parseInt((await bribe.methods.getEpochStart(latest.timestamp).call()).toString());
         if (config) {
             if( epochStart != config.epochStart ){
