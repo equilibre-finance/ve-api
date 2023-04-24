@@ -3,7 +3,7 @@ const moment = require('moment')
 const express = require('express')
 const Web3 = require('web3');
 require('dotenv').config({path: '.env'});
-const web3 = new Web3(process.env.RPC);
+const web3_utils = new Web3(process.env.RPC);
 const fs = require('fs');
 const {_} = require('lodash');
 
@@ -26,14 +26,11 @@ let veNftStats = {};
 
 let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
 let Gauges = [], holderInfo = [];
-const abeVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
+const abiVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
 const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
 const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
 const abiVe = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
 const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
-const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
-const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
-const voter = new web3.eth.Contract(abeVoter, voterAddress);
 
 const YEAR = 365;
 const DAY = 86400;
@@ -109,17 +106,18 @@ function computeVeVARA(amount, locktime, ts) {
     const days = parseInt((locktime - ts) / DAY);
     return parseFloat(FACTOR * days * amount);
 }
+
+
 function getVeStats(value, locktime, ts){
     locktime = parseInt(locktime);
     ts = parseInt(ts);
-    let amount = parseFloat(web3.utils.fromWei(value));
+    let amount = parseFloat(web3_utils.utils.fromWei(value));
     const ve = computeVeVARA(amount, parseInt(locktime), parseInt(ts));
     const days = parseInt((locktime - ts) / DAY);
     const date = new Date(ts*1000).toISOString();
     return {amount, ve, days, date};
 }
-async function saveDeposit(e, blockInfo, provider, tokenId, value, locktime, deposit_type, ts){
-    // const LockedBalanceAtNow = await votingEscrow.methods.locked(tokenId).call();
+async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value, locktime, deposit_type, ts){
     /*
     DEPOSIT_FOR_TYPE,
     CREATE_LOCK_TYPE,
@@ -140,7 +138,7 @@ async function saveDeposit(e, blockInfo, provider, tokenId, value, locktime, dep
     }
 
     const {amount, ve, days, date} = getVeStats(value, locktime, ts);
-    console.log(`@${epochNumber} Deposit: ${provider} ${amount} ve=${ve}, days=${days}`);
+    console.log(`@${epochNumber} Deposit ${deposit_type}: ${provider} ${amount} ve=${ve}, days=${days}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -160,7 +158,7 @@ async function saveDeposit(e, blockInfo, provider, tokenId, value, locktime, dep
     });
 }
 async function saveWithdraw(e, blockInfo, provider, tokenId, value){
-    const amount = parseFloat(web3.utils.fromWei(value));
+    const amount = parseFloat(web3_utils.utils.fromWei(value));
     console.log(`@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
@@ -184,7 +182,7 @@ async function saveTransfer(e, blockInfo, from, to, tokenId){
         nftByAddress[to].push(tokenId);
     }else if( to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
-        console.log(`@${epochNumber} ${type}: ${to} #${tokenId}`);
+        console.log(`@${epochNumber} ${type}: ${from} #${tokenId}`);
         nftByAddress[from].splice( nftByAddress[from].indexOf(tokenId), 1 );
     }else {
         type = 'Transfer';
@@ -216,6 +214,8 @@ function _bribeStart(timestamp) {
 
 async function getPastEvents(args){
     try{
+        const web3 = new Web3(process.env.RPC);
+        const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
         const events = await votingEscrow.getPastEvents(args);
         for (let j = 0; j < events.length; j++) {
             const e = events[j];
@@ -230,7 +230,7 @@ async function getPastEvents(args){
                 // console.log('e', e);
                 // console.log('blockInfo', blockInfo);
                 allData.push( {tx: e.transactionHash, block: e.blockNumber, event: e.event, returnValues: e.returnValues} );
-                await saveDeposit(e, blockInfo, u.provider, u.tokenId, u.value, u.locktime, u.deposit_type, u.ts );
+                await saveDeposit(votingEscrow, e, blockInfo, u.provider, u.tokenId, u.value, u.locktime, u.deposit_type, u.ts );
             }else if (e.event === 'Withdraw') {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
@@ -247,6 +247,7 @@ async function getPastEvents(args){
                 await saveTransfer( e, blockInfo, u.from, u.to, u.tokenId );
             }else if (e.event === 'Supply'){
             }else if (e.event === 'Approval'){
+            }else if (e.event === 'ApprovalForAll'){
             }else{
                 console.log('non mapped event', e);
             }
@@ -254,7 +255,7 @@ async function getPastEvents(args){
         saveData();
         return true;
     }catch(e){
-        console.log(args, e.toString());
+        console.log('getPastEvents', args, e.toString());
         return false;
     }
 }
@@ -266,7 +267,7 @@ async function exec(){
     running = true;
     let size =  1000
     const blocks = startBlockNumber + size;
-    const latest = await web3.eth.getBlock("latest");
+    const latest = await web3_utils.eth.getBlock("latest");
     endBlockNumber = latest.number;
     if( blocks > endBlockNumber ){
         size = endBlockNumber - startBlockNumber;
@@ -280,7 +281,7 @@ async function exec(){
         }
         const args = {fromBlock: i, toBlock: i + size - 1};
         console.log(`@${epochNumber} getPastEvents`, args);
-        while( await getPastEvents(args) === false ){
+        while( await getPastEvents(args) !== true ){
             console.log(`@${epochNumber} getPastEvents error retrying...`, args);
         }
     }
@@ -389,7 +390,7 @@ async function main() {
 }
 
 async function getInfo(){
-    const latest = await web3.eth.getBlock("latest");
+    const latest = await web3_utils.eth.getBlock("latest");
     const blocksBehind = latest.number - startBlockNumber;
     const since = moment.unix(startBlockTimestamp).fromNow();
     return {
@@ -419,6 +420,8 @@ function byKey(key) {
 
 
 async function exec_holder_info(){
+    const web3 = new Web3(process.env.RPC);
+    const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
     let calls = [], addresses = [];
     for( let address in nftByAddress ) {
         for( let i in nftByAddress[address] ) {
@@ -477,6 +480,9 @@ async function MULTICALL(calls){
             _calls[l] = calls[i];
             l++;
         }
+
+        const web3 = new Web3(process.env.RPC);
+        const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
         const _results = await cmd( multicall.methods.aggregate(_calls) );
         results = results.concat(_results[1]);
         j += limit;
@@ -486,6 +492,9 @@ async function MULTICALL(calls){
 }
 
 async function exec_gauge_info(){
+    const web3 = new Web3(process.env.RPC);
+    const voter = new web3.eth.Contract(abiVoter, voterAddress);
+
     let lines = [];
     const length = await cmd(voter.methods.length());
     for (let i = 0; i < length; ++i) {
@@ -521,9 +530,9 @@ async function cmd(fctl){
         try{
             return await fctl.call();
         }catch (e) {
-            console.log(`run-error: ${e.toString()}`);
+            console.log(`cmd-error: ${e.toString()}`);
             // console.trace();
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 10000));
         }
     }
 }
