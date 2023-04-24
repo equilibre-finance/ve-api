@@ -1,10 +1,11 @@
 'use strict';
+const moment = require('moment')
 const express = require('express')
 const Web3 = require('web3');
 require('dotenv').config({path: '.env'});
 const web3 = new Web3(process.env.RPC);
 const fs = require('fs');
-const { md } = import('markdown-to-html-cli');
+const {_} = require('lodash');
 
 process.on('uncaughtException', function (err) {
     console.error('[uncaughtException]', err);
@@ -14,142 +15,374 @@ process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
 
 
-const votingEscrowContract = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
-const bribeContract = '0xc401adf58F18AF7fD1bf88d5a29a203d3B3783B2';
-const minAmount = 165;
+let startBlockNumber = 3708801, endBlockNumber, epochNumber = 0, epoch = 0;
+let startBlockTimestamp;
+let endProcessing = false, running = false;
+const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
+const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
 
-let info = [], totalVARA = 0, totalVE = 0;
-let allData = [], veLockersJSON = [];
-const abi = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
-const votingEscrow = new web3.eth.Contract(abi, votingEscrowContract);
-
-const bribe_abi = JSON.parse(fs.readFileSync('./bribe-abi.js'));
-const bribe = new web3.eth.Contract(bribe_abi, bribeContract);
+let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
+const abiVe = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
+const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
+const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
+const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
 
 const YEAR = 365;
 const DAY = 86400;
 const FACTOR = 0.25 / YEAR;
 
+
+function getEpochStart(timestamp) {
+    const bribeStart = _bribeStart(timestamp);
+    const bribeEnd = bribeStart + SEVEN_DAYS;
+    return timestamp < bribeEnd ? bribeStart : bribeStart + SEVEN_DAYS;
+}
+
+function getEpoch(blockInfo){
+    startBlockTimestamp = blockInfo.timestamp;
+    startBlockNumber = blockInfo.number;
+    const currentEpoch = parseInt( getEpochStart(startBlockTimestamp) );
+    // console.log(`old epoch: @${epochNumber} (${epoch})`)
+    if( epoch !== currentEpoch ){
+        epochNumber++;
+        epoch = currentEpoch;
+        console.log(`new epoch: @${epochNumber} (${epoch})`)
+    }
+}
+
+function loadData(){
+    const r = JSON.parse( fs.readFileSync(`./data/Config.json`).toString() );
+    startBlockNumber = r.startBlockNumber;
+    epochNumber = parseInt(r.epochNumber);
+    epoch = parseInt(r.epoch);
+    Deposit = JSON.parse( fs.readFileSync(`./data/Deposit.json`).toString() );
+    Withdraw = JSON.parse( fs.readFileSync(`./data/Withdraw.json`).toString() );
+    Transfer = JSON.parse( fs.readFileSync(`./data/Transfer.json`).toString() );
+    allData = JSON.parse( fs.readFileSync(`./data/allData.json`).toString() );
+    nftByAddress = JSON.parse( fs.readFileSync(`./data/nftByAddress.json`).toString() );
+}
+
+let saveDataCache = {};
+function saveData(){
+    if( saveDataCache.startBlockNumber !== startBlockNumber || saveDataCache.epochNumber !== epochNumber ) {
+        const r = {
+            startBlockNumber: startBlockNumber,
+            epochNumber: epochNumber,
+            epoch: epoch
+        };
+        fs.writeFileSync(`./data/Config.json`, JSON.stringify(r, undefined, '    '));
+        saveDataCache.startBlockNumber = startBlockNumber;
+        saveDataCache.epochNumber = epochNumber;
+        saveDataCache.epoch = epoch;
+    }
+    if( saveDataCache.Deposit !== Deposit ) {
+        fs.writeFileSync(`./data/Deposit.json`, JSON.stringify(Deposit,undefined, '   '));
+        saveDataCache.Deposit = Deposit.length;
+    }
+    if( saveDataCache.Withdraw !== Withdraw.length ) {
+        fs.writeFileSync(`./data/Withdraw.json`, JSON.stringify(Withdraw,undefined, '   '));
+        saveDataCache.Withdraw = Withdraw;
+    }
+    if( saveDataCache.Transfer !== Transfer.length ) {
+        fs.writeFileSync(`./data/Transfer.json`, JSON.stringify(Transfer,undefined, '   '));
+        fs.writeFileSync(`./data/nftByAddress.json`, JSON.stringify(nftByAddress,undefined, '   '));
+        saveDataCache.Transfer = Transfer.length;
+    }
+    if( saveDataCache.allData !== allData.length ) {
+        fs.writeFileSync(`./data/allData.json`, JSON.stringify(allData,undefined, '   '));
+        saveDataCache.allData = allData.length;
+    }
+}
+
 function computeVeVARA(amount, locktime, ts) {
+    amount = parseFloat(amount);
+    locktime = parseInt(locktime);
+    ts = parseInt(ts);
     const days = parseInt((locktime - ts) / DAY);
     return parseFloat(FACTOR * days * amount);
 }
+function getVeStats(value, locktime, ts){
+    locktime = parseInt(locktime);
+    ts = parseInt(ts);
+    let amount = parseFloat(web3.utils.fromWei(value));
+    const ve = computeVeVARA(amount, parseInt(locktime), parseInt(ts));
+    const days = parseInt((locktime - ts) / DAY);
+    const date = new Date(ts*1000).toISOString();
+    return {amount, ve, days, date};
+}
+async function saveDeposit(e, blockInfo, provider, tokenId, value, locktime, deposit_type, ts){
+    // const LockedBalanceAtNow = await votingEscrow.methods.locked(tokenId).call();
+    /*
+    DEPOSIT_FOR_TYPE,
+    CREATE_LOCK_TYPE,
+    INCREASE_LOCK_AMOUNT,
+    INCREASE_UNLOCK_TIME,
+    MERGE_TYPE
+    MERGE_TYPE
+    */
+    deposit_type = parseInt(deposit_type);
+    let type = 'DEPOSIT';
+    if( deposit_type === 1 ) type = 'CREATE_LOCK';
+    if( deposit_type === 2 ) type = 'INCREASE_LOCK';
+    if( deposit_type === 4 ) type = 'MERGE_TYPE';
+    if( !locktime || parseInt(locktime) === 0 ) {
+        // await new Promise(resolve => setTimeout(resolve, 1000));
+        const LockedBalanceAtBlock = await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber);
+        locktime = LockedBalanceAtBlock.end;
+    }
 
-async function onEventData( events ){
-    for (let j = 0; j < events.length; j++) {
-        const e = events[j];
-        if (!e.event) continue;
-        if (e.event !== 'Deposit') continue;
-        const u = e.returnValues;
-        let amount = u.value;
-        let locktime = u.locktime;
-        if( u.deposit_type == 2 ) {
-            // await new Promise(resolve => setTimeout(resolve, 1000));
-            const LockedBalance = await votingEscrow.methods.locked(u.tokenId).call();
-            locktime = LockedBalance.end;
+    const {amount, ve, days, date} = getVeStats(value, locktime, ts);
+    console.log(`@${epochNumber} Deposit: ${provider} ${amount} ve=${ve}, days=${days}`);
+    Deposit.push({
+        blockTimestamp: blockInfo.timestamp,
+        blockNumber: e.blockNumber,
+        epochNumber: epochNumber,
+        epoch: epoch,
+        address: provider,
+        valueInWei: value,
+        valueInDecimal: amount,
+        ve: ve,
+        days: days,
+        locktime: locktime,
+        ts: ts,
+        date: date,
+        type: type,
+        typeId: deposit_type,
+        tx: e.transactionHash
+    });
+}
+async function saveWithdraw(e, blockInfo, provider, tokenId, value){
+    const amount = parseFloat(web3.utils.fromWei(value));
+    console.log(`@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
+    Deposit.push({
+        blockTimestamp: blockInfo.timestamp,
+        blockNumber: e.blockNumber,
+        epochNumber: epochNumber,
+        epoch: epoch,
+        address: provider,
+        valueInWei: value,
+        valueInDecimal: amount,
+        tx: e.transactionHash
+    });
+}
+
+async function saveTransfer(e, blockInfo, from, to, tokenId){
+    let type;
+    if(!nftByAddress[from]) nftByAddress[from] = [];
+    if(!nftByAddress[to]) nftByAddress[to] = [];
+    if( from === '0x0000000000000000000000000000000000000000') {
+        type = 'Mint';
+        console.log(`@${epochNumber} ${type}: ${to} #${tokenId}`);
+        nftByAddress[to].push(tokenId);
+    }else if( to === '0x0000000000000000000000000000000000000000') {
+        type = 'Burn';
+        console.log(`@${epochNumber} ${type}: ${to} #${tokenId}`);
+        nftByAddress[from].splice( nftByAddress[from].indexOf(tokenId), 1 );
+    }else {
+        type = 'Transfer';
+        nftByAddress[from].splice( nftByAddress[from].indexOf(tokenId));
+        nftByAddress[to].push(tokenId);
+        console.log(`@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
+    }
+    Transfer.push({
+        blockTimestamp: blockInfo.timestamp,
+        blockNumber: e.blockNumber,
+        epochNumber: epochNumber,
+        epoch: epoch,
+        type: type,
+        from: from,
+        to: to,
+        tokenId: tokenId,
+        tx: e.transactionHash
+    });
+}
+
+const ONE_MINUTE = 60 * 1000;
+const ONE_HOUR = 60 * ONE_MINUTE;
+const ONE_DAY = 86_400;
+const SEVEN_DAYS = 7 * ONE_DAY;
+
+function _bribeStart(timestamp) {
+    return timestamp - (timestamp % SEVEN_DAYS);
+}
+
+async function getPastEvents(args){
+    try{
+        const events = await votingEscrow.getPastEvents(args);
+        for (let j = 0; j < events.length; j++) {
+            const e = events[j];
+            if (!e.event) continue;
+            // event Transfer(address indexed _from, address indexed _to, uint256 indexed _tokenId);
+            // event Deposit( address indexed provider, uint tokenId, uint value, uint indexed locktime, DepositType deposit_type, uint ts );
+            // event Withdraw(address indexed provider, uint tokenId, uint value, uint ts);
+            const u = e.returnValues;
+            if (e.event === 'Deposit'){
+                const blockInfo = await web3.eth.getBlock(e.blockNumber);
+                getEpoch(blockInfo);
+                // console.log('e', e);
+                // console.log('blockInfo', blockInfo);
+                allData.push( {tx: e.transactionHash, block: e.blockNumber, event: e.event, returnValues: e.returnValues} );
+                await saveDeposit(e, blockInfo, u.provider, u.tokenId, u.value, u.locktime, u.deposit_type, u.ts );
+            }else if (e.event === 'Withdraw') {
+                const blockInfo = await web3.eth.getBlock(e.blockNumber);
+                getEpoch(blockInfo);
+                // console.log('e', e);
+                // console.log('blockInfo', blockInfo);
+                allData.push( {tx: e.transactionHash, block: e.blockNumber, event: e.event, returnValues: e.returnValues} );
+                await saveWithdraw(e, blockInfo, u.provider, u.tokenId, u.value);
+            }else if (e.event === 'Transfer'){
+                const blockInfo = await web3.eth.getBlock(e.blockNumber);
+                getEpoch(blockInfo);
+                //console.log('saveTransfer', u);
+                // console.log('blockInfo', blockInfo);
+                allData.push( {tx: e.transactionHash, block: e.blockNumber, event: e.event, returnValues: e.returnValues} );
+                await saveTransfer( e, blockInfo, u.from, u.to, u.tokenId );
+            }else if (e.event === 'Supply'){
+            }else{
+                console.log('non mapped event', e);
+            }
         }
-        amount = parseFloat(web3.utils.fromWei(amount));
-        if( amount === 0 ) continue;
-        const ve = computeVeVARA(amount, parseInt(locktime), parseInt(u.ts));
-        if (ve === 0) continue;
-        const days = parseInt((locktime - u.ts) / DAY);
-        if (days === 0) continue;
-        const date = new Date(u.ts*1000).toISOString();
-        const line = `|${u.provider}|${parseFloat(amount).toFixed(2)}|${parseFloat(ve).toFixed(2)}|${days}|${date}|`;
-        if (u.ts > config.epochEnd ) {
-            console.log(` STOP: locktime=${locktime} epochEnd=${config.epochEnd}`);
-            endProcessing = true;
-            break;
-        }
-        totalVARA += amount;
-        totalVE += ve;
-        console.log(line);
-        info.push(line);
-        allData.push({address: u.provider, amount: amount, ve: ve, days: days, date: date});
+        saveData();
+        return true;
+    }catch(e){
+        console.log(args, e.toString());
+        return false;
     }
 }
-
-let endProcessing = false;
-let config, home;
-async function scanBlockchain() {
-    let size = config.debug ? 1 : 1000
-
-    info.push(`|Address|Vara|veVara|Days|Date|`);
-    info.push(`|:---|---:|---:|---:|---:|`);
-
-    for (let i = config.startBlockNumber; i < config.endBlockNumber; i += size) {
-        if( endProcessing ) break;
-        const args = {fromBlock: i, toBlock: i + size};
-        try {
-            const r = await votingEscrow.getPastEvents(args);
-            await onEventData(r);
-        } catch (e) {
-            console.log(e.toString());
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    const TOTAL = `# Totals:\n\n- VARA ${totalVARA}\n- veVARA ${totalVE}\n\n`;
-    console.log(TOTAL);
-    info = prepend(TOTAL, info);
-    home = md( {markdown: info.join('\n')} );
-    veLockersJSON = allData;
-}
-
-async function getBlocksFromLastEpoch(block) {
-    const latest = await web3.eth.getBlock("latest");
-    const epochStart = parseInt(latest.timestamp);
-    const epochEnd = parseInt((await bribe.methods.getEpochStart(latest.timestamp).call()).toString());
-    const blocksBehind = parseInt((latest.timestamp - epochEnd) / 6.4);
-    const startBlockNumber = latest.number - blocksBehind;
-    const endBlockNumber = latest.number;
-    config = {
-        epochStart: epochStart,
-        epochEnd: epochEnd,
-        startBlockNumber: startBlockNumber,
-        endBlockNumber: endBlockNumber
-    };
-    if( block ){
-        config.debug = true;
-        config.startBlockNumber = block;
-        config.endBlockNumber = block+1;
-    }
-}
-
-function prepend(value, array) {
-    let newArray = array.slice();
-    newArray.unshift(value);
-    return newArray;
-}
-
 async function exec(){
-    const block = 0;
-    await getBlocksFromLastEpoch(block);
-    try {
-        await scanBlockchain();
-    } catch (e) {
-        console.log(`Error running the chain scan: ${e.toString()}`);
+    if( running ){
+        console.log(`scanBlockchain: already running, waiting next interaction...`);
+        return;
     }
+    running = true;
+    let size =  1000
+    const blocks = startBlockNumber + size;
+    const latest = await web3.eth.getBlock("latest");
+    endBlockNumber = latest.number;
+    if( blocks > endBlockNumber ){
+        size = endBlockNumber - startBlockNumber;
+        console.log(`@${epochNumber} -- resize to ${size}`)
+    }
+
+    for (let i = startBlockNumber; i < endBlockNumber; i += size) {
+        if( endProcessing ) break;
+        const args = {fromBlock: i, toBlock: i + size - 1};
+        console.log(`@${epochNumber}`, args);
+        while( ! await getPastEvents(args) ){
+            console.log(`retry: `, args);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+
+    running = false;
 }
 
 async function main() {
     const app = express()
     const port = process.env.HTTP_PORT
 
-    app.get('/', (req, res) => {
-        res.send(home)
+    app.get('/', async (req, res) => {
+
+        const latest = await web3.eth.getBlock("latest");
+        const blocksBehind = latest.number - startBlockNumber;
+        const since = moment.unix(startBlockTimestamp).fromNow();
+        const stats = {
+            timeBehind: since,
+            processedBlockTimestamp: startBlockTimestamp,
+            processedBlock: startBlockNumber,
+            blocksBehind: blocksBehind,
+            currentBlock: latest.number,
+            currentEpochNumber: epochNumber,
+            currentEpochTimestamp: epoch,
+            Deposit: Deposit.length,
+            Withdraw: Withdraw.length,
+            Transfer: Transfer.length,
+            allData: allData.length
+        };
+        res.json(stats);
     })
 
-    app.get('/api/v1/weekly-ve-lockers', (req, res) => {
-        res.json( veLockersJSON );
+    app.get('/api/v1/deposit/:epoch', (req, res) => {
+        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
+        res.json( Deposit.filter( (r)=>{ return r.epochNumber===argEpoch } ) );
     })
+    app.get('/api/v1/withdraw/:epoch', (req, res) => {
+        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
+        res.json( Withdraw.filter( (r)=>{ return r.epochNumber===argEpoch } ) );
+    })
+
+    app.get('/api/v1/transfer/:epoch', (req, res) => {
+        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
+        res.json( Transfer.filter( (r)=>{ return r.epochNumber===argEpoch } ) );
+    })
+
+    app.get('/api/v1/all/:epoch', (req, res) => {
+        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
+        res.json( allData.filter( (r)=>{ return r.epochNumber===argEpoch } ) );
+    })
+
+    app.get('/api/v1/nftByAddress/:address', (req, res) => {
+        const address = req.params.address;
+        res.json( nftByAddress[address] ? nftByAddress[address] : [] );
+    })
+
+    app.get('/api/v1/allHoldersBalance', async (req, res) => {
+        let sortBy = req.query.sortBy ? req.query.sortBy : 'tokenId';
+        let orderBy = req.query.orderBy ? req.query.orderBy : 'asc';
+        res.json( await allHoldersBalance(sortBy, orderBy) );
+    })
+
 
     app.listen(port, () => {
         console.log(`- HTTP ${port}`)
     })
 
     console.log(`- RPC: ${process.env.RPC}`);
+
+    loadData();
     await exec();
-    setInterval(exec, 60 * 60 * 1000 );
+    setInterval(exec, ONE_MINUTE );
+}
+
+function byKey(key) {
+    return function (o) {
+        var v = parseInt(o[key], 10);
+        return isNaN(v) ? o[key] : v;
+    };
+}
+
+async function allHoldersBalance(sortBy, orderBy){
+    let calls = [], addresses = [];
+    for( let address in nftByAddress ) {
+        for( let i in nftByAddress[address] ) {
+            const tokenId = nftByAddress[address][i];
+            const locked = await votingEscrow.methods.locked(tokenId);
+            const lockedAbi = locked.encodeABI();
+            const call =
+                {
+                    target: veAddress,
+                    callData: lockedAbi,
+                    fee: 0
+                };
+            calls.push(call);
+            addresses.push({tokenId: tokenId, owner: address});
+        }
+    }
+    const ts = parseInt(new Date().getTime()/1000);
+    const results = await multicall.methods.aggregate(calls).call();
+    const r = results[1];
+    for( let i in r ){
+        const info = web3.eth.abi.decodeParameters(['int128', 'uint256'], r[i]);
+        const {amount, ve, days, date} = getVeStats(info[0], info[1], ts);
+        addresses[i].tokenAmount = amount;
+        addresses[i].veAmount = ve;
+        addresses[i].endDate = date;
+        addresses[i].endTimestamp = info[1];
+        addresses[i].days = days;
+        // console.log(addresses[i]);
+    }
+
+    return _.orderBy(addresses, byKey(sortBy), [orderBy]);
 }
 
 main();
