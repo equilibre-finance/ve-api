@@ -8,8 +8,9 @@ const fs = require('fs');
 const {_} = require('lodash');
 
 process.on('uncaughtException', function (err) {
-    console.error('[uncaughtException]', err);
-    // process.exit(0);
+    console.error(err.toString());
+    console.trace();
+    process.exit(0);
 });
 process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
@@ -273,12 +274,14 @@ async function exec(){
     }
 
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
-        if( endProcessing ) break;
+        if( endProcessing ){
+            console.log(`@${epochNumber} endProcessing`, args);
+            break;
+        }
         const args = {fromBlock: i, toBlock: i + size - 1};
-        console.log(`@${epochNumber}`, args);
-        while( ! await getPastEvents(args) ){
-            console.log(`retry: `, args);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log(`@${epochNumber} getPastEvents`, args);
+        while( await getPastEvents(args) === false ){
+            console.log(`@${epochNumber} getPastEvents error retrying...`, args);
         }
     }
 
@@ -305,10 +308,10 @@ async function main() {
         lines.push(`<li>Current Block: ${stats.currentBlock}</li>`);
         lines.push(`<li>Current Epoch Number: ${stats.currentEpochNumber}</li>`);
         lines.push(`<li>Current Epoch Timestamp: ${stats.currentEpochTimestamp}</li>`);
-        lines.push(`<li>Deposit: ${stats.Deposit.length}</li>`);
-        lines.push(`<li>Withdraw: ${stats.Withdraw.length}</li>`);
-        lines.push(`<li>Transfer: ${stats.Transfer.length}</li>`);
-        lines.push(`<li>All transactions processed: ${stats.allData.length}</li>`);
+        lines.push(`<li>Deposit: ${Deposit.length}</li>`);
+        lines.push(`<li>Withdraw: ${Withdraw.length}</li>`);
+        lines.push(`<li>Transfer: ${Transfer.length}</li>`);
+        lines.push(`<li>All transactions processed: ${allData.length}</li>`);
         lines.push(`<li>Total of veNft Holders: ${holderInfo.length}</li>`);
         lines.push(`<li>Total ve:: ${veNftStats.veAmount}</li>`);
         lines.push(`<li>Total tokens: ${veNftStats.tokensAmount}</li>`);
@@ -433,8 +436,7 @@ async function exec_holder_info(){
         }
     }
     const ts = parseInt(new Date().getTime()/1000);
-    const results = await multicall.methods.aggregate(calls).call();
-    const r = results[1];
+    const r = await MULTICALL(calls);
     let balances = [];
     let stats = {veAmount: 0, tokensAmount: 0};
     for( let i in r ){
@@ -462,22 +464,42 @@ async function exec_holder_info(){
 
 }
 
+async function MULTICALL(calls){
+    //
+    let results = [];
+    let j = 0;
+    const limit = 1000;
+    while( j < calls.length ){
+        let _calls = [];
+        let l = 0;
+        for( let i = j ; i < j+limit ; i++ ){
+            if( ! calls[i] ) break;
+            _calls[l] = calls[i];
+            l++;
+        }
+        const _results = await cmd( multicall.methods.aggregate(_calls) );
+        results = results.concat(_results[1]);
+        j += limit;
+    }
+    //console.log(`class=${calls.length} results=${results.length}`)
+    return results;
+}
 
 async function exec_gauge_info(){
     let lines = [];
-    const length = await voter.methods.length().call();
+    const length = await cmd(voter.methods.length());
     for (let i = 0; i < length; ++i) {
-        const poolAddress = await voter.methods.pools(i).call();
-        const gaugeAddress = await voter.methods.gauges(poolAddress).call();
+        const poolAddress = await cmd(voter.methods.pools(i));
+        const gaugeAddress = await cmd(voter.methods.gauges(poolAddress));
 
         const gauge = new web3.eth.Contract(abiGauge, gaugeAddress);
         const pool = new web3.eth.Contract(abiPair, poolAddress);
 
-        const isAlive = await voter.methods.isAlive(gaugeAddress).call();
-        const symbol = await pool.methods.symbol().call();
-        const fees = await pool.methods.fees().call();
-        const internal_bribe = await gauge.methods.internal_bribe().call();
-        const external_bribe = await gauge.methods.external_bribe().call();
+        const isAlive = await cmd(voter.methods.isAlive(gaugeAddress));
+        const symbol = await cmd(pool.methods.symbol());
+        const fees = await cmd(pool.methods.fees());
+        const internal_bribe = await cmd(gauge.methods.internal_bribe());
+        const external_bribe = await cmd(gauge.methods.external_bribe());
         console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
         lines.push({
             index: i,
@@ -494,6 +516,17 @@ async function exec_gauge_info(){
     Gauges = lines;
 }
 
+async function cmd(fctl){
+    while( true ){
+        try{
+            return await fctl.call();
+        }catch (e) {
+            console.log(`run-error: ${e.toString()}`);
+            // console.trace();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+}
 
 
 main();

@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "license": "MIT",
+  "scripts": {
+    "start": "forever --stack_trace_limit=20 index.js"
+  },
   "dependencies": {
     "bignumber.js": "^9.1.1",
     "chalk": "1.1.3",
