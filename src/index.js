@@ -21,9 +21,10 @@ let endProcessing = false, running = false;
 const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
 const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
 const voterAddress = '0x4eB2B9768da9Ea26E3aBe605c9040bC12F236a59';
+let veNftStats = {};
 
 let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
-let Gauges = [];
+let Gauges = [], holderInfo = [];
 const abeVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
 const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
 const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
@@ -244,6 +245,7 @@ async function getPastEvents(args){
                 allData.push( {tx: e.transactionHash, block: e.blockNumber, event: e.event, returnValues: e.returnValues} );
                 await saveTransfer( e, blockInfo, u.from, u.to, u.tokenId );
             }else if (e.event === 'Supply'){
+            }else if (e.event === 'Approval'){
             }else{
                 console.log('non mapped event', e);
             }
@@ -288,24 +290,30 @@ async function main() {
     const port = process.env.HTTP_PORT
 
     app.get('/', async (req, res) => {
+        res.json( await getInfo() );
+    })
 
-        const latest = await web3.eth.getBlock("latest");
-        const blocksBehind = latest.number - startBlockNumber;
-        const since = moment.unix(startBlockTimestamp).fromNow();
-        const stats = {
-            timeBehind: since,
-            processedBlockTimestamp: startBlockTimestamp,
-            processedBlock: startBlockNumber,
-            blocksBehind: blocksBehind,
-            currentBlock: latest.number,
-            currentEpochNumber: epochNumber,
-            currentEpochTimestamp: epoch,
-            Deposit: Deposit.length,
-            Withdraw: Withdraw.length,
-            Transfer: Transfer.length,
-            allData: allData.length
-        };
-        res.json(stats);
+    app.get('/info', async (req, res) => {
+        const stats = await getInfo();
+        let lines = [];
+        lines.push(`<h1>Global Info</h1>`);
+        lines.push(`<hr><ul>`);
+        lines.push(`<li>Time Behind: ${stats.timeBehind}</li>`);
+        lines.push(`<li>Processed Block Timestamp: ${stats.processedBlockTimestamp}</li>`);
+        lines.push(`<li>Processed Block: ${stats.processedBlock}</li>`);
+        lines.push(`<li>Blocks Behind: ${stats.blocksBehind}</li>`);
+        lines.push(`<li>Current Block: ${stats.currentBlock}</li>`);
+        lines.push(`<li>Current Epoch Number: ${stats.currentEpochNumber}</li>`);
+        lines.push(`<li>Current Epoch Timestamp: ${stats.currentEpochTimestamp}</li>`);
+        lines.push(`<li>Deposit: ${stats.Deposit.length}</li>`);
+        lines.push(`<li>Withdraw: ${stats.Withdraw.length}</li>`);
+        lines.push(`<li>Transfer: ${stats.Transfer.length}</li>`);
+        lines.push(`<li>All transactions processed: ${stats.allData.length}</li>`);
+        lines.push(`<li>Total of veNft Holders: ${holderInfo.length}</li>`);
+        lines.push(`<li>Total ve:: ${veNftStats.veAmount}</li>`);
+        lines.push(`<li>Total tokens: ${veNftStats.tokensAmount}</li>`);
+        lines.push(`</ul>`);
+        res.send( lines.join('\n') );
     })
 
     app.get('/api/v1/deposit/:epoch', (req, res) => {
@@ -335,7 +343,7 @@ async function main() {
     app.get('/api/v1/allHoldersBalance', async (req, res) => {
         let sortBy = req.query.sortBy ? req.query.sortBy : 'tokenId';
         let orderBy = req.query.orderBy ? req.query.orderBy : 'asc';
-        res.json( await allHoldersBalance(sortBy, orderBy) );
+        res.json( _.orderBy(holderInfo, byKey(sortBy), [orderBy]) );
     })
 
     app.get('/api/v1/gaugeInfo', async (req, res) => {
@@ -370,9 +378,33 @@ async function main() {
 
     loadData();
     exec_gauge_info();
-    await exec();
-    setInterval(exec, ONE_MINUTE );
+    exec_holder_info();
+    setInterval(exec_holder_info, ONE_MINUTE );
     setInterval(exec_gauge_info, ONE_HOUR );
+    exec();
+    setInterval(exec, ONE_MINUTE );
+}
+
+async function getInfo(){
+    const latest = await web3.eth.getBlock("latest");
+    const blocksBehind = latest.number - startBlockNumber;
+    const since = moment.unix(startBlockTimestamp).fromNow();
+    return {
+        timeBehind: since,
+        processedBlockTimestamp: startBlockTimestamp,
+        processedBlock: startBlockNumber,
+        blocksBehind: blocksBehind,
+        currentBlock: latest.number,
+        currentEpochNumber: epochNumber,
+        currentEpochTimestamp: epoch,
+        Deposit: Deposit.length,
+        Withdraw: Withdraw.length,
+        Transfer: Transfer.length,
+        allData: allData.length,
+        veNftHolders: holderInfo.length,
+        veAmount: veNftStats.veAmount,
+        tokensAmount: veNftStats.tokensAmount
+    };
 }
 
 function byKey(key) {
@@ -382,7 +414,8 @@ function byKey(key) {
     };
 }
 
-async function allHoldersBalance(sortBy, orderBy){
+
+async function exec_holder_info(){
     let calls = [], addresses = [];
     for( let address in nftByAddress ) {
         for( let i in nftByAddress[address] ) {
@@ -402,19 +435,33 @@ async function allHoldersBalance(sortBy, orderBy){
     const ts = parseInt(new Date().getTime()/1000);
     const results = await multicall.methods.aggregate(calls).call();
     const r = results[1];
+    let balances = [];
+    let stats = {veAmount: 0, tokensAmount: 0};
     for( let i in r ){
         const info = web3.eth.abi.decodeParameters(['int128', 'uint256'], r[i]);
         const {amount, ve, days, date} = getVeStats(info[0], info[1], ts);
-        addresses[i].tokenAmount = amount;
-        addresses[i].veAmount = ve;
-        addresses[i].endDate = date;
-        addresses[i].endTimestamp = info[1];
-        addresses[i].days = days;
+        if( amount > 0 && ve > 0 && days > 0 ) {
+            balances.push({
+                tokenId: addresses[i].tokenId,
+                owner: addresses[i].address,
+                tokenAmount: amount,
+                veAmount: ve,
+                endDate: date,
+                endTimestamp: info[1],
+                days: days
+            });
+            stats.veAmount += ve;
+            stats.tokensAmount += amount;
+        }
         // console.log(addresses[i]);
     }
 
-    return _.orderBy(addresses, byKey(sortBy), [orderBy]);
+    veNftStats = stats;
+    holderInfo = balances;
+    console.log(`exec_holder_info: ${holderInfo.length}`)
+
 }
+
 
 async function exec_gauge_info(){
     let lines = [];
