@@ -20,12 +20,18 @@ let startBlockTimestamp;
 let endProcessing = false, running = false;
 const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
 const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
+const voterAddress = '0x4eB2B9768da9Ea26E3aBe605c9040bC12F236a59';
 
 let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
+let Gauges = [];
+const abeVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
+const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
+const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
 const abiVe = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
 const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
 const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
 const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
+const voter = new web3.eth.Contract(abeVoter, voterAddress);
 
 const YEAR = 365;
 const DAY = 86400;
@@ -332,6 +338,29 @@ async function main() {
         res.json( await allHoldersBalance(sortBy, orderBy) );
     })
 
+    app.get('/api/v1/gaugeInfo', async (req, res) => {
+        let lines = [`<h1>Gauges (${Gauges.length})</h1>`];
+        for( let i in Gauges ) {
+            const r = Gauges[i];
+            lines.push('-----------------------------------------------------------')
+            if (r.isAlive) {
+                lines.push(` - ${i}: Gauge: ${r.gaugeAddress} ${r.symbol}`);
+            } else {
+                lines.push(` - ${i}: Gauge: ${r.gaugeAddress} ${r.symbol} [DEAD]`);
+            }
+            lines.push(`     Pool: ${r.poolAddress}`);
+            lines.push(`     Pair Fees: ${r.fees}`);
+            lines.push(`     Internal Bribe: ${r.internal_bribe}`);
+            lines.push(`     External Bribe: ${r.external_bribe}`);
+        }
+        const html = `<pre>${lines.join('\n')}`;
+        res.send( html );
+    })
+
+    app.get('/api/v1/gauges', async (req, res) => {
+        res.json( Gauges );
+    })
+
 
     app.listen(port, () => {
         console.log(`- HTTP ${port}`)
@@ -340,13 +369,15 @@ async function main() {
     console.log(`- RPC: ${process.env.RPC}`);
 
     loadData();
+    exec_gauge_info();
     await exec();
     setInterval(exec, ONE_MINUTE );
+    setInterval(exec_gauge_info, ONE_HOUR );
 }
 
 function byKey(key) {
     return function (o) {
-        var v = parseInt(o[key], 10);
+        const v = parseInt(o[key], 10);
         return isNaN(v) ? o[key] : v;
     };
 }
@@ -384,5 +415,38 @@ async function allHoldersBalance(sortBy, orderBy){
 
     return _.orderBy(addresses, byKey(sortBy), [orderBy]);
 }
+
+async function exec_gauge_info(){
+    let lines = [];
+    const length = await voter.methods.length().call();
+    for (let i = 0; i < length; ++i) {
+        const poolAddress = await voter.methods.pools(i).call();
+        const gaugeAddress = await voter.methods.gauges(poolAddress).call();
+
+        const gauge = new web3.eth.Contract(abiGauge, gaugeAddress);
+        const pool = new web3.eth.Contract(abiPair, poolAddress);
+
+        const isAlive = await voter.methods.isAlive(gaugeAddress).call();
+        const symbol = await pool.methods.symbol().call();
+        const fees = await pool.methods.fees().call();
+        const internal_bribe = await gauge.methods.internal_bribe().call();
+        const external_bribe = await gauge.methods.external_bribe().call();
+        console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
+        lines.push({
+            index: i,
+            poolAddress: poolAddress,
+            gaugeAddress: gaugeAddress,
+            isAlive: isAlive,
+            symbol: symbol,
+            fees: fees,
+            internal_bribe: internal_bribe,
+            external_bribe: external_bribe,
+        });
+
+    }
+    Gauges = lines;
+}
+
+
 
 main();
