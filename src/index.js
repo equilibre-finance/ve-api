@@ -7,25 +7,20 @@ const web3_utils = new Web3(process.env.RPC);
 const fs = require('fs');
 const {_} = require('lodash');
 
-process.on('uncaughtException', function (err) {
-    console.error(err.toString());
-    console.trace();
-    process.exit(0);
-});
 process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
 
 
 let startBlockNumber = 3708801, endBlockNumber, epochNumber = 0, epoch = 0;
 let startBlockTimestamp;
-let endProcessing = false, running = false;
+let running = false;
 const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
 const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
 const voterAddress = '0x4eB2B9768da9Ea26E3aBe605c9040bC12F236a59';
 let veNftStats = {};
 
 let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
-let Gauges = [], holderInfo = [];
+let Gauges = [], holderInfo = [], POOL = [];
 const abiVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
 const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
 const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
@@ -45,7 +40,6 @@ function getEpochStart(timestamp) {
 
 function getEpoch(blockInfo){
     startBlockTimestamp = blockInfo.timestamp;
-    startBlockNumber = blockInfo.number;
     const currentEpoch = parseInt( getEpochStart(startBlockTimestamp) );
     // console.log(`old epoch: @${epochNumber} (${epoch})`)
     if( epoch !== currentEpoch ){
@@ -65,6 +59,7 @@ function loadData(){
     Transfer = JSON.parse( fs.readFileSync(`./data/Transfer.json`).toString() );
     allData = JSON.parse( fs.readFileSync(`./data/allData.json`).toString() );
     nftByAddress = JSON.parse( fs.readFileSync(`./data/nftByAddress.json`).toString() );
+    POOL = JSON.parse( fs.readFileSync(`./data/POOL.json`).toString() );
 }
 
 let saveDataCache = {};
@@ -96,6 +91,10 @@ function saveData(){
     if( saveDataCache.allData !== allData.length ) {
         fs.writeFileSync(`./data/allData.json`, JSON.stringify(allData,undefined, '   '));
         saveDataCache.allData = allData.length;
+    }
+    if( saveDataCache.POOL !== POOL.length ) {
+        fs.writeFileSync(`./data/POOL.json`, JSON.stringify(POOL,undefined, '   '));
+        saveDataCache.POOL = POOL.length;
     }
 }
 
@@ -129,7 +128,8 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     deposit_type = parseInt(deposit_type);
     let type = 'DEPOSIT';
     if( deposit_type === 1 ) type = 'CREATE_LOCK';
-    if( deposit_type === 2 ) type = 'INCREASE_LOCK';
+    if( deposit_type === 2 ) type = 'INCREASE_LOCK_AMOUNT';
+    if( deposit_type === 3 ) type = 'INCREASE_UNLOCK_TIME';
     if( deposit_type === 4 ) type = 'MERGE_TYPE';
     if( !locktime || parseInt(locktime) === 0 ) {
         // await new Promise(resolve => setTimeout(resolve, 1000));
@@ -138,7 +138,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     }
 
     const {amount, ve, days, date} = getVeStats(value, locktime, ts);
-    console.log(`@${epochNumber} Deposit ${deposit_type}: ${provider} ${amount} ve=${ve}, days=${days}`);
+    console.log(`@${epochNumber} Deposit ${type}: ${provider} ${amount} ve=${ve}, days=${days}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -220,6 +220,12 @@ async function getPastEvents(args){
         for (let j = 0; j < events.length; j++) {
             const e = events[j];
             if (!e.event) continue;
+            const txid = `${e.transactionHash}-${j}`;
+            if( POOL.indexOf(txid) !== -1 ){
+                console.log(`FOUND: TX=${txid} blockNumber=${e.blockNumber}`, args);
+                continue;
+            }
+            POOL.push(txid);
             // event Transfer(address indexed _from, address indexed _to, uint256 indexed _tokenId);
             // event Deposit( address indexed provider, uint tokenId, uint value, uint indexed locktime, DepositType deposit_type, uint ts );
             // event Withdraw(address indexed provider, uint tokenId, uint value, uint ts);
@@ -252,22 +258,23 @@ async function getPastEvents(args){
                 console.log('non mapped event', e);
             }
         }
-        saveData();
         return true;
     }catch(e){
         console.log('getPastEvents', args, e.toString());
         return false;
     }
 }
-async function exec(){
-    if( running ){
-        console.log(`scanBlockchain: already running, waiting next interaction...`);
+async function processEvents(){
+    if( running === true ){
+        console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber}`);
         return;
     }
     running = true;
+    let web3 = new Web3(process.env.RPC);
     let size =  1000
     const blocks = startBlockNumber + size;
-    const latest = await web3_utils.eth.getBlock("latest");
+    const latest = await web3.eth.getBlock("latest");
+    startBlockTimestamp = latest.timestamp;
     endBlockNumber = latest.number;
     if( blocks > endBlockNumber ){
         size = endBlockNumber - startBlockNumber;
@@ -275,15 +282,26 @@ async function exec(){
     }
 
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
-        if( endProcessing ){
-            console.log(`@${epochNumber} endProcessing`, args);
-            break;
+        let args = {fromBlock: i, toBlock: i + size - 1};
+        if( args.toBlock > endBlockNumber ) {
+            console.log(`@${epochNumber} getPastEvents`, args, ` resize: ${args.toBlock}->${endBlockNumber}`);
+            args.toBlock = endBlockNumber;
+        }else{
+            console.log(`@${epochNumber} getPastEvents`, args, ` latest.number=${latest.number}`);
         }
-        const args = {fromBlock: i, toBlock: i + size - 1};
-        console.log(`@${epochNumber} getPastEvents`, args);
+
+        let retryCount = 0;
         while( await getPastEvents(args) !== true ){
-            console.log(`@${epochNumber} getPastEvents error retrying...`, args);
+            console.log(`@${epochNumber} getPastEvents error retrying in 10s...`, args);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            if( retryCount >= 10 ){
+                saveData();
+                process.exit(0);
+            }
+            ++retryCount;
         }
+        startBlockNumber = args.toBlock;
+        saveData();
     }
 
     running = false;
@@ -385,8 +403,8 @@ async function main() {
     exec_holder_info();
     setInterval(exec_holder_info, ONE_MINUTE );
     setInterval(exec_gauge_info, ONE_HOUR );
-    exec();
-    setInterval(exec, ONE_MINUTE );
+    processEvents();
+    setInterval(processEvents, ONE_MINUTE );
 }
 
 async function getInfo(){
@@ -526,14 +544,20 @@ async function exec_gauge_info(){
 }
 
 async function cmd(fctl){
+    let retryCount = 0;
     while( true ){
         try{
             return await fctl.call();
         }catch (e) {
-            console.log(`cmd-error: ${e.toString()}`);
+            console.log(`cmd-error ${retryCount}: ${e.toString()}`);
             // console.trace();
-            await new Promise(resolve => setTimeout(resolve, 10000));
         }
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        if( retryCount >= 10 ){
+            console.log('--EXIT--')
+            process.exit(0);
+        }
+        ++retryCount;
     }
 }
 
