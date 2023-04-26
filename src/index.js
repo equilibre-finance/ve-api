@@ -7,6 +7,10 @@ const web3_utils = new Web3(process.env.RPC);
 const fs = require('fs');
 const {_} = require('lodash');
 
+process.on('uncaughtException', function (err) {
+    console.error(err);
+});
+
 process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
 
@@ -264,22 +268,49 @@ async function getPastEvents(args){
         return false;
     }
 }
+
+let processEventRetryCount = 0, processEventRetryLastEvent = 0;
 async function processEvents(){
-    if( running === true ){
-        console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber}`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if( running === true ) {
+        if (processEventRetryLastEvent === 0){
+            processEventRetryLastEvent = startBlockNumber;
+        }else if( processEventRetryLastEvent == startBlockNumber ) {
+            ++processEventRetryCount;
+        }else{
+            processEventRetryLastEvent = startBlockNumber;
+            processEventRetryCount = 0;
+        }
+        console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber} retry=${processEventRetryCount}/${processEventRetryLastEvent}`);
+        if( processEventRetryCount > 10 ) {
+            console.log(` -- EXITING DUE TO 10min STUCK --`);
+            process.exit(0);
+        }
         return;
     }
     running = true;
     let web3 = new Web3(process.env.RPC);
     let size =  1000
     const blocks = startBlockNumber + size;
-    const latest = await web3.eth.getBlock("latest");
+    let latest;
+    while( ! latest ) {
+        try {
+            latest = await web3.eth.getBlock("latest");
+            break;
+        } catch (e) {
+            console.log(`--ERROR GETTING LAST BLOCK, RETRY IN 10s... --`, e.toString());
+            web3 = new Web3(process.env.RPC);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+        }
+    }
     startBlockTimestamp = latest.timestamp;
     endBlockNumber = latest.number;
     if( blocks > endBlockNumber ){
         size = endBlockNumber - startBlockNumber;
         console.log(`@${epochNumber} -- resize to ${size}`)
     }
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
         let args = {fromBlock: i, toBlock: i + size - 1};
@@ -292,6 +323,7 @@ async function processEvents(){
 
         let retryCount = 0;
         while( await getPastEvents(args) !== true ){
+            web3 = new Web3(process.env.RPC);
             console.log(`@${epochNumber} getPastEvents error retrying in 10s...`, args);
             await new Promise(resolve => setTimeout(resolve, 10000));
             if( retryCount >= 10 ){
@@ -408,6 +440,7 @@ async function main() {
 }
 
 async function getInfo(){
+    await new Promise(resolve => setTimeout(resolve, 1000));
     const latest = await web3_utils.eth.getBlock("latest");
     const blocksBehind = latest.number - startBlockNumber;
     const since = moment.unix(startBlockTimestamp).fromNow();
@@ -436,7 +469,14 @@ function byKey(key) {
     };
 }
 
-
+function Call( method ){
+    const call = {
+            "target": method._parent._address,
+            "callData": method.encodeABI(),
+            "fee": 0
+        };
+    return call;
+}
 async function exec_holder_info(){
     const web3 = new Web3(process.env.RPC);
     const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
@@ -485,7 +525,7 @@ async function exec_holder_info(){
 
 }
 
-async function MULTICALL(calls){
+async function MULTICALL(calls, abi){
     //
     let results = [];
     let j = 0;
@@ -498,35 +538,76 @@ async function MULTICALL(calls){
             _calls[l] = calls[i];
             l++;
         }
-
+        await new Promise(resolve => setTimeout(resolve, 1000));
         const web3 = new Web3(process.env.RPC);
         const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
         const _results = await cmd( multicall.methods.aggregate(_calls) );
         results = results.concat(_results[1]);
         j += limit;
     }
-    //console.log(`class=${calls.length} results=${results.length}`)
+
+    if( abi ){
+        const web3 = new Web3(process.env.RPC);
+        for( let i in results) {
+            results[i] = web3.eth.abi.decodeParameters(abi, results[i])[0];
+        }
+        return results;
+    }
     return results;
 }
 
 async function exec_gauge_info(){
+    await new Promise(resolve => setTimeout(resolve, 1000));
     const web3 = new Web3(process.env.RPC);
     const voter = new web3.eth.Contract(abiVoter, voterAddress);
 
     let lines = [];
     const length = await cmd(voter.methods.length());
+
+    let getPoolsAddresses = [], getGaugeAddress = [];
     for (let i = 0; i < length; ++i) {
-        const poolAddress = await cmd(voter.methods.pools(i));
-        const gaugeAddress = await cmd(voter.methods.gauges(poolAddress));
+        getPoolsAddresses.push( Call(voter.methods.pools(i)) );
+    }
+
+    getPoolsAddresses = await MULTICALL(getPoolsAddresses, ['address']);
+
+
+    for (let i = 0; i < length; ++i) {
+        getGaugeAddress.push( Call(voter.methods.gauges( getPoolsAddresses[i] )) );
+    }
+    getGaugeAddress = await MULTICALL(getGaugeAddress, ['address']);
+
+    let getIsAlive = [], getSymbol = [], getFees = [], getInternalBribe = [], getExteranlBribe = [];
+    for (let i = 0; i < length; ++i) {
+        const poolAddress = getPoolsAddresses[i];
+        const gaugeAddress = getGaugeAddress[i];
 
         const gauge = new web3.eth.Contract(abiGauge, gaugeAddress);
         const pool = new web3.eth.Contract(abiPair, poolAddress);
 
-        const isAlive = await cmd(voter.methods.isAlive(gaugeAddress));
-        const symbol = await cmd(pool.methods.symbol());
-        const fees = await cmd(pool.methods.fees());
-        const internal_bribe = await cmd(gauge.methods.internal_bribe());
-        const external_bribe = await cmd(gauge.methods.external_bribe());
+        getIsAlive.push(Call( voter.methods.isAlive(gaugeAddress) ));
+        getSymbol.push(Call( pool.methods.symbol() ));
+        getFees.push(Call( pool.methods.fees() ));
+        getInternalBribe.push(Call( gauge.methods.internal_bribe() ));
+        getExteranlBribe.push(Call( gauge.methods.external_bribe() ));
+
+
+    }
+
+    getIsAlive = await MULTICALL(getIsAlive,['bool']);
+    getSymbol = await MULTICALL(getSymbol,['string']);
+    getFees = await MULTICALL(getFees,['uint256']);
+    getInternalBribe = await MULTICALL(getInternalBribe,['address']);
+    getExteranlBribe = await MULTICALL(getExteranlBribe,['address']);
+
+    for (let i = 0; i < length; ++i) {
+        const poolAddress = getPoolsAddresses[i];
+        const gaugeAddress = getGaugeAddress[i];
+        const isAlive = getIsAlive[i];
+        const symbol = getSymbol[i];
+        const fees = getFees[i];
+        const internal_bribe = getInternalBribe[i];
+        const external_bribe = getExteranlBribe[i];
         console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
         lines.push({
             index: i,
@@ -547,6 +628,7 @@ async function cmd(fctl){
     let retryCount = 0;
     while( true ){
         try{
+            await new Promise(resolve => setTimeout(resolve, 1000));
             return await fctl.call();
         }catch (e) {
             console.log(`cmd-error ${retryCount}: ${e.toString()}`);
