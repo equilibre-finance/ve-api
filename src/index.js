@@ -284,6 +284,7 @@ async function processEvents(){
         console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber} retry=${processEventRetryCount}/${processEventRetryLastEvent}`);
         if( processEventRetryCount > 10 ) {
             console.log(` -- EXITING DUE TO 10min STUCK --`);
+            saveData();
             process.exit(0);
         }
         return;
@@ -636,7 +637,8 @@ async function cmd(fctl){
         }
         await new Promise(resolve => setTimeout(resolve, 10000));
         if( retryCount >= 10 ){
-            console.log('--EXIT--')
+            console.log('--EXIT--');
+            saveData();
             process.exit(0);
         }
         ++retryCount;
