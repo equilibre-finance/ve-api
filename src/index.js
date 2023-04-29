@@ -6,7 +6,7 @@ require('dotenv').config({path: '.env'});
 const web3_utils = new Web3(process.env.RPC);
 const fs = require('fs');
 const {_} = require('lodash');
-
+const waitOnCalls = true;
 process.on('uncaughtException', function (err) {
     console.error(err);
 });
@@ -136,7 +136,6 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     if( deposit_type === 3 ) type = 'INCREASE_UNLOCK_TIME';
     if( deposit_type === 4 ) type = 'MERGE_TYPE';
     if( !locktime || parseInt(locktime) === 0 ) {
-        // await new Promise(resolve => setTimeout(resolve, 1000));
         const LockedBalanceAtBlock = await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber);
         locktime = LockedBalanceAtBlock.end;
     }
@@ -282,11 +281,11 @@ async function processEvents(){
             processEventRetryCount = 0;
         }
         console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber} retry=${processEventRetryCount}/${processEventRetryLastEvent}`);
-        if( processEventRetryCount > 10 ) {
-            console.log(` -- EXITING DUE TO 10min STUCK --`);
-            saveData();
-            process.exit(0);
-        }
+        // if( processEventRetryCount > 10 ) {
+        //     console.log(` -- EXITING DUE TO 10min STUCK --`);
+        //     saveData();
+        //     process.exit(0);
+        // }
         return;
     }
     running = true;
@@ -327,10 +326,10 @@ async function processEvents(){
             web3 = new Web3(process.env.RPC);
             console.log(`@${epochNumber} getPastEvents error retrying in 10s...`, args);
             await new Promise(resolve => setTimeout(resolve, 10000));
-            if( retryCount >= 10 ){
-                saveData();
-                process.exit(0);
-            }
+            // if( retryCount >= 10 ){
+            //     saveData();
+            //     process.exit(0);
+            // }
             ++retryCount;
         }
         startBlockNumber = args.toBlock;
@@ -632,15 +631,15 @@ async function cmd(fctl){
             await new Promise(resolve => setTimeout(resolve, 1000));
             return await fctl.call();
         }catch (e) {
-            console.log(`cmd-error ${retryCount}: ${e.toString()}`);
-            // console.trace();
+            console.log(`cmd-error ${fctl._method.name}() ${retryCount}: ${e.toString()}`);
+            //console.trace();
         }
         await new Promise(resolve => setTimeout(resolve, 10000));
-        if( retryCount >= 10 ){
-            console.log('--EXIT--');
-            saveData();
-            process.exit(0);
-        }
+        // if( retryCount >= 10 ){
+        //     console.log('--EXIT--');
+        //     saveData();
+        //     process.exit(0);
+        // }
         ++retryCount;
     }
 }
