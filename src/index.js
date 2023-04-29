@@ -352,6 +352,7 @@ async function main() {
         let lines = [];
         lines.push(`<h1>Global Info</h1>`);
         lines.push(`<hr><ul>`);
+        lines.push(`<li>RPC status: ${stats.rpcStatus}</li>`);
         lines.push(`<li>Time Behind: ${stats.timeBehind}</li>`);
         lines.push(`<li>Processed Block Timestamp: ${stats.processedBlockTimestamp}</li>`);
         lines.push(`<li>Processed Block: ${stats.processedBlock}</li>`);
@@ -441,15 +442,25 @@ async function main() {
 
 async function getInfo(){
     await new Promise(resolve => setTimeout(resolve, 1000));
-    const latest = await web3_utils.eth.getBlock("latest");
-    const blocksBehind = latest.number - startBlockNumber;
+    let latestBlock = 0, blocksBehind = -1;
+    let rpcStatus = `RPC ${process.env.RPC} OK.`;
+    try {
+        const latest = await web3_utils.eth.getBlock("latest");
+        latestBlock = latest.number;
+        blocksBehind = latestBlock - startBlockNumber;
+    }catch(e){
+        rpcStatus = `RPC ${process.env.RPC} error: ${e.toString()}`;
+        console.log(`getInfo: ${e.toString()}`);
+    }
+
     const since = moment.unix(startBlockTimestamp).fromNow();
     return {
+        rpcStatus: rpcStatus,
         timeBehind: since,
         processedBlockTimestamp: startBlockTimestamp,
         processedBlock: startBlockNumber,
         blocksBehind: blocksBehind,
-        currentBlock: latest.number,
+        currentBlock: latestBlock,
         currentEpochNumber: epochNumber,
         currentEpochTimestamp: epoch,
         Deposit: Deposit.length,
