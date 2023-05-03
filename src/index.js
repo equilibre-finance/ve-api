@@ -607,7 +607,7 @@ async function exec_gauge_info(){
 
     getIsAlive = await MULTICALL(getIsAlive,['bool']);
     getSymbol = await MULTICALL(getSymbol,['string']);
-    getFees = await MULTICALL(getFees,['uint256']);
+    getFees = await MULTICALL(getFees,['address']);
     getInternalBribe = await MULTICALL(getInternalBribe,['address']);
     getExteranlBribe = await MULTICALL(getExteranlBribe,['address']);
 
