@@ -53,17 +53,26 @@ function getEpoch(blockInfo){
     }
 }
 
+function readOrCrateJsonFile(file, initialData ){
+    if( ! fs.existsSync(file) ){
+        fs.writeFileSync(file, initialData);
+    }
+    return JSON.parse( fs.readFileSync(file).toString() );
+}
+
 function loadData(){
-    const r = JSON.parse( fs.readFileSync(`./data/Config.json`).toString() );
+    const r = readOrCrateJsonFile(`./data/Config.json`,
+        `{"startBlockNumber": 3708801, "epochNumber": 0, "epoch": 0}`);
     startBlockNumber = r.startBlockNumber;
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
-    Deposit = JSON.parse( fs.readFileSync(`./data/Deposit.json`).toString() );
-    Withdraw = JSON.parse( fs.readFileSync(`./data/Withdraw.json`).toString() );
-    Transfer = JSON.parse( fs.readFileSync(`./data/Transfer.json`).toString() );
-    allData = JSON.parse( fs.readFileSync(`./data/allData.json`).toString() );
-    nftByAddress = JSON.parse( fs.readFileSync(`./data/nftByAddress.json`).toString() );
-    POOL = JSON.parse( fs.readFileSync(`./data/POOL.json`).toString() );
+
+    Deposit = readOrCrateJsonFile(`./data/Deposit.json`, `[]`);
+    Withdraw = readOrCrateJsonFile(`./data/Withdraw.json`, `[]`);
+    Transfer = readOrCrateJsonFile(`./data/Transfer.json`, `[]`);
+    allData = readOrCrateJsonFile(`./data/allData.json`, `[]`);
+    nftByAddress = readOrCrateJsonFile(`./data/nftByAddress.json`, `{}`);
+    POOL = readOrCrateJsonFile(`./data/POOL.json`, `[]`);
 }
 
 let saveDataCache = {};

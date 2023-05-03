@@ -1,12 +1,14 @@
 version: '3'
 
 services:
-  voter-lockers:
+  ve-api:
     build:
       context: .
       dockerfile: Dockerfile
     image: nodejs
-    container_name: voter-lockers
+    container_name: ve-api
     restart: unless-stopped
     expose:
       - 8381:8381
+    volumes:
+      - ./data:/app/data
