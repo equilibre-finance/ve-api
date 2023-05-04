@@ -322,7 +322,7 @@ async function processEvents(){
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
-        let args = {fromBlock: i, toBlock: i + size - 1};
+        let args = {fromBlock: i+1, toBlock: i + size - 1};
         if( args.toBlock > endBlockNumber ) {
             console.log(`@${epochNumber} getPastEvents`, args, ` resize: ${args.toBlock}->${endBlockNumber}`);
             args.toBlock = endBlockNumber;
@@ -628,7 +628,7 @@ async function exec_gauge_info(){
         const fees = getFees[i];
         const internal_bribe = getInternalBribe[i];
         const external_bribe = getExteranlBribe[i];
-        console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
+        // console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
         lines.push({
             index: i,
             poolAddress: poolAddress,
@@ -641,6 +641,7 @@ async function exec_gauge_info(){
         });
 
     }
+    console.log(`gauges: ${lines.length}`);
     Gauges = lines;
 }
 
