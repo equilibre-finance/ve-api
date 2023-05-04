@@ -279,7 +279,7 @@ async function getPastEvents(args){
 
 let processEventRetryCount = 0, processEventRetryLastEvent = 0;
 async function processEvents(){
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    //await new Promise(resolve => setTimeout(resolve, 1000));
     if( running === true ) {
         if (processEventRetryLastEvent === 0){
             processEventRetryLastEvent = startBlockNumber;
@@ -289,7 +289,7 @@ async function processEvents(){
             processEventRetryLastEvent = startBlockNumber;
             processEventRetryCount = 0;
         }
-        console.log(`running: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber} retry=${processEventRetryCount}/${processEventRetryLastEvent}`);
+        console.log(`\trunning: start=${startBlockNumber} end=${endBlockNumber} epochNumber=${epochNumber} retry=${processEventRetryCount}/${processEventRetryLastEvent}`);
         // if( processEventRetryCount > 10 ) {
         //     console.log(` -- EXITING DUE TO 10min STUCK --`);
         //     saveData();
@@ -319,10 +319,10 @@ async function processEvents(){
         console.log(`@${epochNumber} -- resize to ${size}`)
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    //await new Promise(resolve => setTimeout(resolve, 1000));
 
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
-        let args = {fromBlock: i+1, toBlock: i + size - 1};
+        let args = {fromBlock: i, toBlock: i + size - 1};
         if( args.toBlock > endBlockNumber ) {
             console.log(`@${epochNumber} getPastEvents`, args, ` resize: ${args.toBlock}->${endBlockNumber}`);
             args.toBlock = endBlockNumber;
@@ -649,7 +649,7 @@ async function cmd(fctl){
     let retryCount = 0;
     while( true ){
         try{
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            //await new Promise(resolve => setTimeout(resolve, 1000));
             return await fctl.call();
         }catch (e) {
             console.log(`cmd-error ${fctl._method.name}() ${retryCount}: ${e.toString()}`);
