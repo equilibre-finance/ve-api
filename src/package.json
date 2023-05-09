@@ -4,7 +4,9 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "start": "forever --stack_trace_limit=20 index.js"
+    "start": "forever --stack_trace_limit=20 index.js",
+    "test": "node index.js",
+    "live": "nodemon --exec yarn test -e js,ts"
   },
   "dependencies": {
     "bignumber.js": "^9.1.1",
