@@ -9,6 +9,6 @@ services:
     container_name: ve-api
     restart: unless-stopped
     expose:
-      - 8381:8381
+      - 8381/tcp
     volumes:
       - ./data:/app/data
