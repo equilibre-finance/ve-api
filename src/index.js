@@ -220,6 +220,7 @@ async function getPastEvents(args) {
                 // console.log('e', e);
                 // console.log('blockInfo', blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
@@ -230,6 +231,7 @@ async function getPastEvents(args) {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
@@ -240,6 +242,7 @@ async function getPastEvents(args) {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
