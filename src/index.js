@@ -124,7 +124,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     }
 
     const {amount, ve, days, date} = getVeStats(value, locktime, ts);
-    console.log(`\t@${epochNumber} Deposit ${type}: ${provider} ${amount} ve=${ve}, days=${days}`);
+    //console.log(`\t@${epochNumber} Deposit ${type}: ${provider} ${amount} ve=${ve}, days=${days}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -146,7 +146,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
 
 async function saveWithdraw(e, blockInfo, provider, tokenId, value) {
     const amount = parseFloat(web3_utils.utils.fromWei(value));
-    console.log(`\t@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
+    //console.log(`\t@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -165,17 +165,17 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
     if (!nftByAddress[to]) nftByAddress[to] = [];
     if (from === '0x0000000000000000000000000000000000000000') {
         type = 'Mint';
-        console.log(`\t@${epochNumber} ${type}: ${to} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${to} #${tokenId}`);
         nftByAddress[to].push(tokenId);
     } else if (to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
-        console.log(`\t@${epochNumber} ${type}: ${from} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${from} #${tokenId}`);
         nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId), 1);
     } else {
         type = 'Transfer';
         nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId));
         nftByAddress[to].push(tokenId);
-        console.log(`\t@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
     }
     Transfer.push({
         blockTimestamp: blockInfo.timestamp,

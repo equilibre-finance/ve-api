@@ -19,6 +19,7 @@ services:
       - traefik.docker.network=common_traefik
     volumes:
       - ./data:/data
+      - /app/node_modules
 networks:
   common_traefik:
     external: true
