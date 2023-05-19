@@ -259,9 +259,9 @@ async function getPastEvents(args) {
 }
 
 let processEventRetryCount = 0, processEventRetryLastEvent = 0;
-
+let globalRetryCount = 0;
 async function processEvents() {
-    //await new Promise(resolve => setTimeout(resolve, 1000));
+    let startTime = moment();
     if (running === true) {
         if (processEventRetryLastEvent === 0) {
             processEventRetryLastEvent = startBlockNumber;
@@ -277,7 +277,7 @@ async function processEvents() {
     running = true;
     let web3 = new Web3(process.env.RPC);
     let size = 1000
-    const blocks = startBlockNumber + size;
+    const blocks = parseInt(startBlockNumber) + parseInt(size);
     let latest;
     while (!latest) {
         try {
@@ -291,35 +291,56 @@ async function processEvents() {
     }
     startBlockTimestamp = latest.timestamp;
     endBlockNumber = latest.number;
-    if (blocks > endBlockNumber) {
+    if ( blocks > endBlockNumber) {
         size = endBlockNumber - startBlockNumber;
         console.log(`\t@${epochNumber} -- resize to ${size}`)
     }
-    for (let i = startBlockNumber; i < endBlockNumber; i += size) {
-        let args = {fromBlock: i, toBlock: i + size - 1};
-        if (args.toBlock > endBlockNumber) {
-            console.log(`@${epochNumber} getPastEvents`, args, ` resize: ${args.toBlock}->${endBlockNumber}`);
-            args.toBlock = endBlockNumber;
-        } else {
-            console.log(`@${epochNumber} getPastEvents`, args, ` latest.number=${latest.number}`);
+    let endBlock;
+    const rangeSize = 10;
+    const totalBlocks = endBlockNumber - startBlockNumber;
+    for (let i = startBlockNumber; i < endBlockNumber; i += size ) {
+        const blockRanges = [];
+        for (let j = 0; j < rangeSize; j++) {
+            const fromBlock = i + (j * rangeSize);
+            endBlock = fromBlock + rangeSize - 1;
+            if (endBlock > latest.number){
+                endBlock = latest.number - 1;
+                break;
+            }
+            blockRanges.push({fromBlock: fromBlock, toBlock: endBlock});
         }
+        await Promise.all(blockRanges.map(async range => {
+            // await new Promise(resolve => setTimeout(resolve, 1000));
+            while (await getPastEvents(range) !== true) {
+                web3 = new Web3(process.env.RPC);
+                console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, range);
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                ++globalRetryCount;
+            }
+        }));
 
-        let retryCount = 0;
-        while (await getPastEvents(args) !== true) {
-            web3 = new Web3(process.env.RPC);
-            console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, args);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            ++retryCount;
-        }
+        startBlockNumber = endBlock;
         const pendingBlocks = endBlockNumber - startBlockNumber;
+        const processedBlocks = totalBlocks - pendingBlocks;
         // compute the pending blocks percentage left to finish this loop:
-        const pendingBlocksPercent = Math.round((pendingBlocks / (endBlockNumber - args.fromBlock)) * 100);
-        console.log(`@${epochNumber} retry=${retryCount} pendingBlocks=${pendingBlocks} epochNumber=${epochNumber} (${pendingBlocksPercent}%)`);
-        startBlockNumber = args.toBlock;
+        const pendingBlocksPercent = getPercentLeft(totalBlocks, pendingBlocks, processedBlocks);
+
+        let endTime = moment();
+        let timeTaken = moment.duration(endTime.diff(startTime));
+        let timeLeft = moment.duration(timeTaken.asSeconds() * (pendingBlocks / processedBlocks), 'seconds');
+        const timeInfo = `[${timeTaken.humanize()} of ${timeLeft.humanize()} left]`;
+        console.log(`@epoch=${epochNumber} ${pendingBlocksPercent}% ${timeInfo} pending=${pendingBlocks} processed=${processedBlocks} retry=${globalRetryCount}`);
         await saveData();
+        // if( globalRetryCount >= 10 ) process.exit(0);
+        // globalRetryCount++;
     }
 
     running = false;
+}
+
+function getPercentLeft(totalBlocks, pendingBlocks, processedBlocks) {
+    const p = 100-((pendingBlocks / totalBlocks)*100);
+    return p.toFixed(4);
 }
 
 async function main() {
