@@ -311,10 +311,11 @@ async function processEvents() {
             await new Promise(resolve => setTimeout(resolve, 10000));
             ++retryCount;
         }
-        startBlockNumber = args.toBlock;
         const pendingBlocks = endBlockNumber - startBlockNumber;
-        const pendingBlocksPercent = (pendingBlocks / (endBlockNumber - startBlockNumber + pendingBlocks)) * 100;
+        // compute the pending blocks percentage left to finish this loop:
+        const pendingBlocksPercent = Math.round((pendingBlocks / (endBlockNumber - args.fromBlock)) * 100);
         console.log(`@${epochNumber} retry=${retryCount} pendingBlocks=${pendingBlocks} epochNumber=${epochNumber} (${pendingBlocksPercent}%)`);
+        startBlockNumber = args.toBlock;
         await saveData();
     }
 
