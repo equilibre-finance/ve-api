@@ -8,7 +8,17 @@ services:
     image: nodejs
     container_name: ve-api
     restart: unless-stopped
-    expose:
-      - 8381:8381
+    networks:
+      - common_traefik
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ve-api.rule=Host(`votingescrow.equilibrefinance.com`)
+      - traefik.http.routers.ve-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.ve-api.entryPoints=https
+      - traefik.http.services.ve-api.loadbalancer.server.port=8381
+      - traefik.docker.network=common_traefik
     volumes:
-      - ./data:/app/data
+      - ./data:/data
+networks:
+  common_traefik:
+    external: true
