@@ -298,31 +298,19 @@ async function processEvents() {
         size = endBlockNumber - startBlockNumber;
         console.log(`\t@${epochNumber} -- resize to ${size}`)
     }
-    let endBlock;
-    const rangeSize = 10;
-    const totalBlocks = endBlockNumber - startBlockNumber;
-    for (let i = startBlockNumber; i < endBlockNumber; i += size ) {
-        const blockRanges = [];
-        for (let j = 0; j < rangeSize; j++) {
-            const fromBlock = i + (j * rangeSize);
-            endBlock = fromBlock + rangeSize - 1;
-            if (endBlock > latest.number){
-                endBlock = latest.number - 1;
-                break;
-            }
-            blockRanges.push({fromBlock: fromBlock, toBlock: endBlock});
-        }
-        await Promise.all(blockRanges.map(async range => {
-            // await new Promise(resolve => setTimeout(resolve, 1000));
-            while (await getPastEvents(range) !== true) {
-                web3 = new Web3(process.env.RPC);
-                console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, range);
-                await new Promise(resolve => setTimeout(resolve, 10000));
-                ++globalRetryCount;
-            }
-        }));
 
-        startBlockNumber = endBlock;
+    const totalBlocks = endBlockNumber - startBlockNumber;
+    for (let i = startBlockNumber; i < endBlockNumber; i += size) {
+        let args = {fromBlock: i, toBlock: i + size - 1};
+        if (args.toBlock > endBlockNumber) args.toBlock = endBlockNumber;
+        while (await getPastEvents(args) !== true) {
+            web3 = new Web3(process.env.RPC);
+            console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, args);
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            ++globalRetryCount;
+        }
+
+        startBlockNumber = args.toBlock;
         const pendingBlocks = endBlockNumber - startBlockNumber;
         const processedBlocks = totalBlocks - pendingBlocks;
         // compute the pending blocks percentage left to finish this loop:
