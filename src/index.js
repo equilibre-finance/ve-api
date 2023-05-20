@@ -15,8 +15,11 @@ process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
 
 
-let startBlockNumber = 3708801, endBlockNumber, epochNumber = 0, epoch = 0;
-let startBlockTimestamp;
+let startBlockNumber = 3708801;
+let startBlockTimestamp = 1677107210;
+
+let endBlockNumber, epochNumber = 0, epoch = 0;
+
 let running = false;
 const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
 const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
@@ -34,7 +37,7 @@ const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
 const YEAR = 365;
 const DAY = 86400;
 const FACTOR = 0.25 / YEAR;
-
+let startEpoch;
 
 function getEpochStart(timestamp) {
     const bribeStart = _bribeStart(timestamp);
@@ -45,12 +48,8 @@ function getEpochStart(timestamp) {
 function getEpoch(blockInfo) {
     startBlockTimestamp = blockInfo.timestamp;
     const currentEpoch = parseInt(getEpochStart(startBlockTimestamp));
-    // console.log(`old epoch: @${epochNumber} (${epoch})`)
-    if (epoch !== currentEpoch) {
-        epochNumber++;
-        epoch = currentEpoch;
-        console.log(`new epoch: @${epochNumber} (${epoch})`)
-    }
+    // calculate epoch number based on current epoch and last epoch
+    const epochNumber = parseInt((currentEpoch - startEpoch) / SEVEN_DAYS);
 }
 
 function readOrCrateJsonFile(file, initialData) {
@@ -61,8 +60,12 @@ function readOrCrateJsonFile(file, initialData) {
 }
 
 function loadData() {
+
+    // this timestamp is the contract deployment date: 2021-02-19T00:00:10.000Z
+    startEpoch = parseInt(getEpochStart(startBlockTimestamp));
+
     const r = readOrCrateJsonFile(`${process.env.DATA_DIR}/Config.json`,
-        `{"startBlockNumber": 3708801, "epochNumber": 0, "epoch": 0}`);
+        `{"startBlockNumber": `${startBlockNumber}`, "epochNumber": 0, "epoch": 0}`);
     startBlockNumber = r.startBlockNumber;
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
