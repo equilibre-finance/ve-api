@@ -6,7 +6,7 @@ require('dotenv').config({path: '.env'});
 const web3_utils = new Web3(process.env.RPC);
 const fs = require('fs');
 const {_} = require('lodash');
-
+const cors = require('cors');
 process.on('uncaughtException', function (err) {
     console.error(err);
 });
@@ -337,7 +337,8 @@ function getPercentLeft(totalBlocks, pendingBlocks, processedBlocks) {
 async function main() {
     const app = express()
     const port = process.env.HTTP_PORT
-
+    // add suporrt for CORS
+    app.use(cors());
     app.get('/', async (req, res) => {
         res.json(await getInfo());
     })
