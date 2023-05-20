@@ -65,7 +65,7 @@ function loadData() {
     startEpoch = parseInt(getEpochStart(startBlockTimestamp));
 
     const r = readOrCrateJsonFile(`${process.env.DATA_DIR}/Config.json`,
-        `{"startBlockNumber": `${startBlockNumber}`, "epochNumber": 0, "epoch": 0}`);
+        `{"startBlockNumber": ${startBlockNumber}, "epochNumber": 0, "epoch": 0}`);
     startBlockNumber = r.startBlockNumber;
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
