@@ -48,8 +48,8 @@ function getEpochStart(timestamp) {
 function getEpoch(blockInfo) {
     startBlockTimestamp = blockInfo.timestamp;
     const currentEpoch = parseInt(getEpochStart(startBlockTimestamp));
-    epoch = parseInt((currentEpoch - startEpoch) / SEVEN_DAYS);
-    return epoch;
+    epochNumber = parseInt((currentEpoch - startEpoch) / SEVEN_DAYS);
+    return epochNumber;
 }
 
 function readOrCrateJsonFile(file, initialData) {
