@@ -18,7 +18,7 @@ const {_} = require('lodash');
 const Redis = require('redis');
 let redis;
 
-
+const cors = require('cors');
 
 
 
@@ -393,6 +393,7 @@ async function main() {
     await cache_init();
 
     const app = express()
+    app.use(cors())
     const port = process.env.HTTP_PORT
 
     app.get('/stats', async (req, res) => {
