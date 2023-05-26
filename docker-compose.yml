@@ -1,4 +1,4 @@
-version: '3'
+version: "3.9"
 
 services:
   ve-api:
@@ -17,8 +17,19 @@ services:
       - traefik.http.routers.ve-api.entryPoints=https
       - traefik.http.services.ve-api.loadbalancer.server.port=8381
       - traefik.docker.network=common_traefik
+    ports:
+      - "8381:8381/tcp"
+    depends_on:
+      - ve-api-cache
+  ve-api-cache:
+    container_name: ve-api-cache
+    image: redis:6.2-alpine
+    restart: unless-stopped
+    command: redis-server --port ${REDIS_PORT} --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
     volumes:
-      - ./data:/data
+      - ${DATA_DIR}:/data
+    networks:
+      - common_traefik
 networks:
   common_traefik:
     external: true

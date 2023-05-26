@@ -1,11 +1,26 @@
 'use strict';
+
+const fs = require('fs');
+let envFile = '.env';
+// check if .env exits on current dir:
+if (!fs.existsSync(envFile)) {
+    envFile = '../.env';
+}
+require('dotenv').config({path: envFile});
+
 const moment = require('moment')
 const express = require('express')
 const Web3 = require('web3');
-require('dotenv').config({path: '.env'});
+
 const web3_utils = new Web3(process.env.RPC);
-const fs = require('fs');
 const {_} = require('lodash');
+
+const Redis = require('redis');
+let redis;
+
+
+
+
 
 process.on('uncaughtException', function (err) {
     console.error(err);
@@ -15,26 +30,34 @@ process.setMaxListeners(0);
 require('events').EventEmitter.defaultMaxListeners = 0;
 
 
-let startBlockNumber = 3708801, endBlockNumber, epochNumber = 0, epoch = 0;
-let startBlockTimestamp;
+let startBlockNumber = parseInt(process.env.START_BLOCK_NUMBER);
+let startBlockTimestamp = parseInt(process.env.START_BLOCK_TIMESTAMP);
+
+let endBlockNumber, epochNumber = 0, epoch = 0;
+
 let running = false;
-const veAddress = '0x35361C9c2a324F5FB8f3aed2d7bA91CE1410893A';
-const multicallAddress = '0xA47a335D1Dcef7039bD11Cbd789aabe3b6Af531f';
-const voterAddress = '0x4eB2B9768da9Ea26E3aBe605c9040bC12F236a59';
+const veAddress = process.env.VE_ADDRESS;
+const multicallAddress = process.env.MULTICALL_ADDRESS;
+const voterAddress = process.env.VOTER_ADDRESS;
+const oracleAddress = process.env.ORACLE_ADDRESS;
+const veapiAddress = process.env.VEAPI_ADDRESS;
 let veNftStats = {};
 
 let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
 let Gauges = [], holderInfo = [], POOL = [];
+
 const abiVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
 const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
 const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
 const abiVe = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
 const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
+const abiOracle = JSON.parse(fs.readFileSync("./oracle-abi.js", "utf8"));
+const abiVeApi3 = JSON.parse(fs.readFileSync("./veapi-abi.js", "utf8"));
 
 const YEAR = 365;
 const DAY = 86400;
 const FACTOR = 0.25 / YEAR;
-
+let startEpoch;
 
 function getEpochStart(timestamp) {
     const bribeStart = _bribeStart(timestamp);
@@ -45,34 +68,28 @@ function getEpochStart(timestamp) {
 function getEpoch(blockInfo) {
     startBlockTimestamp = blockInfo.timestamp;
     const currentEpoch = parseInt(getEpochStart(startBlockTimestamp));
-    // console.log(`old epoch: @${epochNumber} (${epoch})`)
-    if (epoch !== currentEpoch) {
-        epochNumber++;
-        epoch = currentEpoch;
-        console.log(`new epoch: @${epochNumber} (${epoch})`)
-    }
+    epochNumber = parseInt((currentEpoch - startEpoch) / SEVEN_DAYS);
+    return epochNumber;
 }
 
-function readOrCrateJsonFile(file, initialData) {
-    if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, initialData);
-    }
-    return JSON.parse(fs.readFileSync(file).toString());
-}
+async function loadData() {
 
-function loadData() {
-    const r = readOrCrateJsonFile(`${process.env.DATA_DIR}/Config.json`,
-        `{"startBlockNumber": 3708801, "epochNumber": 0, "epoch": 0}`);
-    startBlockNumber = r.startBlockNumber;
+    // this timestamp is the contract deployment date: 2021-02-19T00:00:10.000Z
+    startEpoch = parseInt(getEpochStart(startBlockTimestamp));
+
+    const r = await get(`Config`,
+        {"startBlockNumber": startBlockNumber, "epochNumber": 0, "epoch": 0}
+    );
+    startBlockNumber = parseInt(r.startBlockNumber);
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
 
-    Deposit = readOrCrateJsonFile(`${process.env.DATA_DIR}/Deposit.json`, `[]`);
-    Withdraw = readOrCrateJsonFile(`${process.env.DATA_DIR}/Withdraw.json`, `[]`);
-    Transfer = readOrCrateJsonFile(`${process.env.DATA_DIR}/Transfer.json`, `[]`);
-    allData = readOrCrateJsonFile(`${process.env.DATA_DIR}/allData.json`, `[]`);
-    nftByAddress = readOrCrateJsonFile(`${process.env.DATA_DIR}/nftByAddress.json`, `{}`);
-    POOL = readOrCrateJsonFile(`${process.env.DATA_DIR}/POOL.json`, `[]`);
+    Deposit = await get(`Deposit`, []);
+    Withdraw = await get(`Withdraw`, []);
+    Transfer = await get(`Transfer`, []);
+    allData = await get(`allData`, []);
+    nftByAddress = await get(`nftByAddress`, []);
+    POOL = await get(`POOL`, []);
 }
 
 async function saveData() {
@@ -82,14 +99,13 @@ async function saveData() {
         epochNumber: epochNumber,
         epoch: epoch
     };
-    fs.writeFileSync(`${process.env.DATA_DIR}/Config.json`, JSON.stringify(r, undefined, '    '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/Deposit.json`, JSON.stringify(Deposit, undefined, '   '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/Withdraw.json`, JSON.stringify(Withdraw, undefined, '   '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/Transfer.json`, JSON.stringify(Transfer, undefined, '   '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/nftByAddress.json`, JSON.stringify(nftByAddress, undefined, '   '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/allData.json`, JSON.stringify(allData, undefined, '   '));
-    fs.writeFileSync(`${process.env.DATA_DIR}/POOL.json`, JSON.stringify(POOL, undefined, '   '));
-
+    await set(`Config`, r);
+    await set(`Deposit`, Deposit);
+    await set(`Withdraw`, Withdraw);
+    await set(`Transfer`, Transfer);
+    await set(`nftByAddress`, nftByAddress);
+    await set(`allData`, allData);
+    await set(`POOL`, POOL);
 }
 
 function computeVeVARA(amount, locktime, ts) {
@@ -124,7 +140,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     }
 
     const {amount, ve, days, date} = getVeStats(value, locktime, ts);
-    console.log(`\t@${epochNumber} Deposit ${type}: ${provider} ${amount} ve=${ve}, days=${days}`);
+    //console.log(`\t@${epochNumber} Deposit ${type}: ${provider} ${amount} ve=${ve}, days=${days}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -146,7 +162,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
 
 async function saveWithdraw(e, blockInfo, provider, tokenId, value) {
     const amount = parseFloat(web3_utils.utils.fromWei(value));
-    console.log(`\t@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
+    //console.log(`\t@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
     Deposit.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -165,17 +181,17 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
     if (!nftByAddress[to]) nftByAddress[to] = [];
     if (from === '0x0000000000000000000000000000000000000000') {
         type = 'Mint';
-        console.log(`\t@${epochNumber} ${type}: ${to} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${to} #${tokenId}`);
         nftByAddress[to].push(tokenId);
     } else if (to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
-        console.log(`\t@${epochNumber} ${type}: ${from} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${from} #${tokenId}`);
         nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId), 1);
     } else {
         type = 'Transfer';
         nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId));
         nftByAddress[to].push(tokenId);
-        console.log(`\t@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
+        //console.log(`\t@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
     }
     Transfer.push({
         blockTimestamp: blockInfo.timestamp,
@@ -220,6 +236,7 @@ async function getPastEvents(args) {
                 // console.log('e', e);
                 // console.log('blockInfo', blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
@@ -230,6 +247,7 @@ async function getPastEvents(args) {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
@@ -240,6 +258,7 @@ async function getPastEvents(args) {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
                 allData.push({
+                    epoch: epoch,
                     tx: e.transactionHash,
                     block: e.blockNumber,
                     event: e.event,
@@ -256,9 +275,10 @@ async function getPastEvents(args) {
 }
 
 let processEventRetryCount = 0, processEventRetryLastEvent = 0;
+let globalRetryCount = 0;
 
 async function processEvents() {
-    //await new Promise(resolve => setTimeout(resolve, 1000));
+    let startTime = moment();
     if (running === true) {
         if (processEventRetryLastEvent === 0) {
             processEventRetryLastEvent = startBlockNumber;
@@ -274,7 +294,7 @@ async function processEvents() {
     running = true;
     let web3 = new Web3(process.env.RPC);
     let size = 1000
-    const blocks = startBlockNumber + size;
+    const blocks = parseInt(startBlockNumber) + parseInt(size);
     let latest;
     while (!latest) {
         try {
@@ -292,38 +312,125 @@ async function processEvents() {
         size = endBlockNumber - startBlockNumber;
         console.log(`\t@${epochNumber} -- resize to ${size}`)
     }
+
+    const totalBlocks = endBlockNumber - startBlockNumber;
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
         let args = {fromBlock: i, toBlock: i + size - 1};
-        if (args.toBlock > endBlockNumber) {
-            console.log(`@${epochNumber} getPastEvents`, args, ` resize: ${args.toBlock}->${endBlockNumber}`);
-            args.toBlock = endBlockNumber;
-        } else {
-            console.log(`@${epochNumber} getPastEvents`, args, ` latest.number=${latest.number}`);
-        }
-
-        let retryCount = 0;
+        if (args.toBlock > endBlockNumber) args.toBlock = endBlockNumber;
         while (await getPastEvents(args) !== true) {
             web3 = new Web3(process.env.RPC);
             console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, args);
             await new Promise(resolve => setTimeout(resolve, 10000));
-            ++retryCount;
+            ++globalRetryCount;
         }
+
         startBlockNumber = args.toBlock;
         const pendingBlocks = endBlockNumber - startBlockNumber;
-        const pendingBlocksPercent = (pendingBlocks / (endBlockNumber - startBlockNumber + pendingBlocks)) * 100;
-        console.log(`@${epochNumber} retry=${retryCount} pendingBlocks=${pendingBlocks} epochNumber=${epochNumber} (${pendingBlocksPercent}%)`);
+        const processedBlocks = totalBlocks - pendingBlocks;
+        // compute the pending blocks percentage left to finish this loop:
+        const pendingBlocksPercent = getPercentLeft(totalBlocks, pendingBlocks, processedBlocks);
+
+        let endTime = moment();
+        let timeTaken = moment.duration(endTime.diff(startTime));
+        let timeLeft = moment.duration(timeTaken.asSeconds() * (pendingBlocks / processedBlocks), 'seconds');
+        const timeInfo = `[${timeTaken.humanize()} of ${timeLeft.humanize()} left]`;
+        console.log(`@epoch=${epochNumber} ${pendingBlocksPercent}% ${timeInfo} pending=${pendingBlocks} processed=${processedBlocks} retry=${globalRetryCount}`);
         await saveData();
+        // if( globalRetryCount >= 10 ) process.exit(0);
+        // globalRetryCount++;
     }
 
     running = false;
 }
 
+function getPercentLeft(totalBlocks, pendingBlocks, processedBlocks) {
+    const p = 100 - ((pendingBlocks / totalBlocks) * 100);
+    return p.toFixed(4);
+}
+
+async function cache_init(){
+    const redisConfig = {
+        url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
+    };
+    redis = Redis.createClient(redisConfig);
+    redis.on('error', err => console.log('Redis Client Error', err));
+    await redis.connect();
+}
+
+async function get(key, defaultValue) {
+    try{
+        let value = await redis.get(key);
+        if( ! value ){
+            value = await set(key, defaultValue);
+        }
+        value = JSON.parse(value);
+        //console.log('get', key, value);
+        return value;
+    }catch (e){
+        console.log('get error', key, e);
+        return defaultValue;
+    }
+}
+async function set(key, object) {
+    try {
+        const value = JSON.stringify(object);
+        await redis.set(key, value);
+        return value;
+    }catch(e){
+        console.log('set error', key, e);
+        return object;
+    }
+}
+function fromWei(value){
+    return web3_utils.utils.fromWei(value.toString(), 'ether');
+}
+// wei to currency
+function w2c(num) {
+    num = parseFloat(fromWei(num));
+    return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
+}
 async function main() {
+    await cache_init();
+
     const app = express()
     const port = process.env.HTTP_PORT
 
+    app.get('/stats', async (req, res) => {
+        const info = await getOracleInfo();
+        let html = `<h1>Oracle Stats</h1>`;
+        html += `<hr><ul>`;
+        html += `<li>timestamp: ${info.timestamp}</li>`;
+        html += `<li>price: ${w2c(info.price)}</li>`;
+        html += `<li>circulatingSupply: ${w2c(info.circulatingSupply)}</li>`;
+        html += `<li>outstandingSupply: ${w2c(info.outstandingSupply)}</li>`;
+        html += `<li>dilutedSupply: ${w2c(info.dilutedSupply)}</li>`;
+        html += `<li>inNFT: ${w2c(info.inNFT)}</li>`;
+        html += `<li>inGauges: ${w2c(info.inGauges)}</li>`;
+        html += `<li>inExcluded: ${w2c(info.inExcluded)}</li>`;
+        html += `<li>veNFTTotalSupply: ${w2c(info.veNFTTotalSupply)}</li>`;
+        html += `<li>lockRatio: ${w2c(info.lockRatio)}</li>`;
+        html += `<li>liquidity: ${w2c(info.liquidity)}</li>`;
+        html += `<li>circulatingMarketCap: ${w2c(info.circulatingMarketCap)}</li>`;
+        html += `<li>marketCap: ${w2c(info.marketCap)}</li>`;
+        html += `<li>fdv: ${w2c(info.fdv)}</li>`;
+        html += `<li>lockedMarketCap: ${w2c(info.lockedMarketCap)}</li>`;
+        html += `</ul>`;
+        html += `<hr/>`;
+        html += `json api endpoint: <a href="/api/v1/stats">/api/v1/stats</a>`;
+        res.send(html);
+    })
+    app.get('/api/v1/stats', async (req, res) => {
+        res.json(await getOracleInfo());
+    })
+
+    app.get('/api/v1/price/:poolAddress', async (req, res) => {
+        const poolAddress = req.params.poolAddress;
+        const poolInfo = await getPoolInfo(poolAddress);
+        res.json(poolInfo);
+    });
+
     app.get('/', async (req, res) => {
-        res.json(await getInfo());
+        res(await getInfo());
     })
 
     app.get('/info', async (req, res) => {
@@ -352,40 +459,40 @@ async function main() {
 
     app.get('/api/v1/deposit/:epoch', (req, res) => {
         const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res.json(Deposit.filter((r) => {
+        res(Deposit.filter((r) => {
             return r.epochNumber === argEpoch
         }));
     })
     app.get('/api/v1/withdraw/:epoch', (req, res) => {
         const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res.json(Withdraw.filter((r) => {
+        res(Withdraw.filter((r) => {
             return r.epochNumber === argEpoch
         }));
     })
 
     app.get('/api/v1/transfer/:epoch', (req, res) => {
         const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res.json(Transfer.filter((r) => {
+        res(Transfer.filter((r) => {
             return r.epochNumber === argEpoch
         }));
     })
 
     app.get('/api/v1/all/:epoch', (req, res) => {
         const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res.json(allData.filter((r) => {
+        res(allData.filter((r) => {
             return r.epochNumber === argEpoch
         }));
     })
 
     app.get('/api/v1/nftByAddress/:address', (req, res) => {
         const address = req.params.address;
-        res.json(nftByAddress[address] ? nftByAddress[address] : []);
+        res(nftByAddress[address] ? nftByAddress[address] : []);
     })
 
     app.get('/api/v1/allHoldersBalance', async (req, res) => {
         let sortBy = req.query.sortBy ? req.query.sortBy : 'tokenId';
         let orderBy = req.query.orderBy ? req.query.orderBy : 'asc';
-        res.json(_.orderBy(holderInfo, byKey(sortBy), [orderBy]));
+        res(_.orderBy(holderInfo, byKey(sortBy), [orderBy]));
     })
 
     app.get('/api/v1/gaugeInfo', async (req, res) => {
@@ -408,7 +515,7 @@ async function main() {
     })
 
     app.get('/api/v1/gauges', async (req, res) => {
-        res.json(Gauges);
+        res(Gauges);
     })
 
 
@@ -418,7 +525,7 @@ async function main() {
 
     console.log(`- RPC: ${process.env.RPC}`);
 
-    loadData();
+    await loadData();
     exec_gauge_info();
     exec_holder_info();
     setInterval(exec_holder_info, ONE_MINUTE);
@@ -428,7 +535,7 @@ async function main() {
 }
 
 async function getInfo() {
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    //await new Promise(resolve => setTimeout(resolve, 1000));
     let latestBlock = 0, blocksBehind = -1;
     let rpcStatus = `RPC ${process.env.RPC} OK.`;
     try {
@@ -458,6 +565,37 @@ async function getInfo() {
         veAmount: veNftStats.veAmount,
         tokensAmount: veNftStats.tokensAmount
     };
+}
+
+async function getPoolInfo(poolAddress){
+    const oracle = new web3_utils.eth.Contract(abiOracle, oracleAddress);
+    const price = await oracle.methods.p_t_coin_usd(poolAddress).call();
+    return {price: price};
+}
+
+async function getOracleInfo() {
+    // initialize contracts
+
+    const veApi = new web3_utils.eth.Contract(abiVeApi3, veapiAddress);
+    const info = await veApi.methods.info().call();
+    return {
+        timestamp: info[0],
+        price: info[1],
+        circulatingSupply: info[2],
+        outstandingSupply: info[3],
+        dilutedSupply: info[4],
+        inNFT: info[5],
+        inGauges: info[6],
+        inExcluded: info[7],
+        veNFTTotalSupply: info[8],
+        lockRatio: info[9],
+        liquidity: info[10],
+        circulatingMarketCap: info[11],
+        marketCap: info[12],
+        fdv: info[13],
+        lockedMarketCap: info[14]
+    };
+
 }
 
 function byKey(key) {
