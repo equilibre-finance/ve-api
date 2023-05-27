@@ -11,36 +11,45 @@ This repository contains a Node.js application that simplifies the retrieval and
   - Batched Calls: To optimize performance and reduce network load, the application utilizes batched calls, allowing multiple data requests to be combined into a single call.
   - Error Handling: Robust error handling mechanisms are implemented to handle failed blockchain calls and retry them after a specific delay.
     
+
 ## API Endpoints
 
 The following API endpoints are available:
 
-- `/stats`: (HTML) Provides information about veVARA and VARA oracle price.
-- `/api/v1/stats`: (JSON) Provides information about veVARA and VARA oracle price.
-- `/api/v1/price/0x7d8100072ba0e4da8dc6bd258859a5dc1a452e05`: (JSON) Provides price information from a pool.
-- `/api/v1/info`: (JSON) Returns information about the ve-api service, such as block and data counts.
-- `/info`: (HTML) Returns information about the ve-API service, such as block and data counts.
-- `/api/v1/deposit/0`: (JSON) Returns information about each deposit in the specified epoch (0 refers to the last epoch).
-- `/api/v1/withdraw/0`: (JSON) Returns information about each withdrawal in the specified epoch (0 refers to the last epoch).
-- `/api/v1/transfer/0`: (JSON) Returns information about each transfer in the specified epoch (0 refers to the last epoch).
-- `/api/v1/all/0`: (JSON) Returns information about all transactions in the contract.
+- `/stats`: Returns information about VE (Voting Escrow) and VARA oracle price in HTML format.
+- `/api/v1/stats`: Returns information about VE (Voting Escrow) and VARA oracle price in JSON format.
+- `/api/v1/price/:poolAddress`: Returns price information from a specific pool identified by `:poolAddress`.
+- `/api/v1/info`: Returns information about the VE-API service, such as block and data counts, in JSON format.
+- `/info`: Returns information about the VE-API service, such as block and data counts, in HTML format.
+- `/api/v1/deposit/:epoch`: Returns information about each deposit in the specified epoch. Use `0` as the epoch to retrieve data from the last epoch.
+- `/api/v1/withdraw/:epoch`: Returns information about each withdrawal in the specified epoch. Use `0` as the epoch to retrieve data from the last epoch.
+- `/api/v1/transfer/:epoch`: Returns information about each transfer in the specified epoch. Use `0` as the epoch to retrieve data from the last epoch.
+- `/api/v1/all/:epoch`: Returns information about all transactions in the contract for the specified epoch. Use `0` as the epoch to retrieve data from the last epoch.
+- `/api/v1/nftByAddress/:address`: Returns information about all NFTs held by the specified Ethereum address.
+- `/api/v1/allHoldersBalance`: Returns information about all NFTs, including balance, owner, VE (Voting Escrow), days, etc.
+- `/api/v1/gaugeInfo`: Returns detailed information about all pool gauges in HTML format.
+- `/api/v1/gauges`: Returns information about the current list of pool gauges in JSON format.
 
 ### Navigation
 
-- `limit`: Used to determine the number of results to return (e.g., `?limit=10000`).
-- `offset`: Used to navigate through the results (e.g., `?offset=0` returns the first 10,000 results, `?offset=1` returns results from 10,001 to 20,000).
-- `epoch`: Used to filter data by epoch number (e.g., `?epoch=10` to get data from epoch 10).
+You can use the following parameters for navigation:
+
+- `limit`: Determines the number of results to return. For example, `?limit=10000` returns the first 10,000 results.
+- `offset`: Use this parameter to navigate through the results. For example, `?offset=0` returns the results from 1 to 10,000, while `?offset=1` returns the results from 10,001 to 20,000.
+- `epoch`: Filter the results by epoch. Use `?epoch=10` to retrieve data from epoch 10.
 
 ### Advanced Filters
 
-You can apply advanced filters to customize the data retrieval based on specific criteria. The filter follows the format `?q[field][operand]=value`, and you can pass multiple filters by including multiple `q` parameters in the URL.
+You can apply advanced filters using the `q` parameter in the following format: `?q[field][operand]=value`. You can combine multiple filters by including multiple `q` parameters in the URL.
 
 Examples:
-- `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]`: Filters all data by address.
-- `?q[days][gt][1000]`: Filters all data by the `days` field greater than 1000 days.
-- Multiple filters: `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]&q[days][gt][1000]` combines the two filters mentioned above.
+- `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]`: Filter all data by address.
+- `?q[days][gt][1000]`: Filter all data by the `days` field greater than 1000.
+- Multiple filters example: `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]&q[days][gt][1000]`: Combine the above two filters.
 
-For more information about the available filter operands, please refer to the [array-query documentation](https://github.com/jacwright/array-query).
+For more information about filter operands, refer to the [array-query](https://github.com/jacwright/array-query) documentation.
+
+
 ## Dependencies
 
 The project relies on the following dependencies:
