@@ -14,8 +14,17 @@ const Web3 = require('web3');
 
 const web3_utils = new Web3(process.env.RPC);
 let web3 = new Web3(process.env.RPC);
-
-
+function fromWei(value){
+    return web3_utils.utils.fromWei(value.toString(), 'ether');
+}
+// wei to currency
+function w2c(num) {
+    num = parseFloat(fromWei(num));
+    return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
+}
+function currency(num) {
+    return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
+}
 const {_} = require('lodash');
 
 const Redis = require('redis');
@@ -140,7 +149,7 @@ function computeVeVARA(amount, locktime, ts) {
 function getVeStats(value, locktime, ts) {
     locktime = parseInt(locktime);
     ts = parseInt(ts);
-    let amount = parseFloat(web3_utils.utils.fromWei(value));
+    let amount = parseFloat(fromWei(value));
     const ve = computeVeVARA(amount, parseInt(locktime), parseInt(ts));
     const days = parseInt((locktime - ts) / DAY);
     const date = new Date(ts * 1000).toISOString();
@@ -331,6 +340,7 @@ async function processEvents() {
     for (let i = startBlockNumber; i < endBlockNumber; i += size) {
         let args = {fromBlock: i, toBlock: i + size - 1};
         if (args.toBlock > endBlockNumber) args.toBlock = endBlockNumber;
+
         while (await getPastEvents(args) !== true) {
             web3 = new Web3(process.env.RPC);
             console.log(`\t@${epochNumber} getPastEvents error retrying in 10s...`, args);
@@ -395,14 +405,7 @@ async function set(key, object) {
         return object;
     }
 }
-function fromWei(value){
-    return web3_utils.utils.fromWei(value.toString(), 'ether');
-}
-// wei to currency
-function w2c(num) {
-    num = parseFloat(fromWei(num));
-    return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
-}
+
 
 function byKey(key) {
     return function (o) {
@@ -593,12 +596,14 @@ async function main() {
         console.log(`- HTTP ${port}`);
         console.log(`- RPC: ${process.env.RPC}`);
         await loadData();
-        exec_gauge_info();
-        exec_holder_info();
+
         setInterval(exec_holder_info, ONE_MINUTE);
         setInterval(exec_gauge_info, ONE_HOUR);
-        processEvents();
         setInterval(processEvents, ONE_MINUTE);
+
+        //exec_gauge_info();
+        //exec_holder_info();
+        processEvents();
     })
 }
 
@@ -674,7 +679,7 @@ function Call(method) {
 }
 
 async function exec_holder_info() {
-    console.log(`exec_holder_info nftByAddress: ${Object.keys(nftByAddress).length}`);
+    
     let calls = [], addresses = [];
     for (let address in nftByAddress) {
         for (let i in nftByAddress[address]) {
@@ -693,7 +698,7 @@ async function exec_holder_info() {
     }
     const ts = parseInt(new Date().getTime() / 1000);
     const r = await MULTICALL(calls);
-    console.log(`exec_holder_info r: ${r.length}`);
+    
     let balances = [];
     let stats = {veAmount: 0, tokensAmount: 0};
     for (let i in r) {
@@ -717,7 +722,7 @@ async function exec_holder_info() {
 
     veNftStats = stats;
     holderInfo = balances;
-    console.log(`exec_holder_info: ${holderInfo.length}`)
+    console.log(`- Holder info: ${balances.length}, ${currency(stats.veAmount)} veNFT, ${currency(stats.tokensAmount)} VARA.`);
 
 }
 
