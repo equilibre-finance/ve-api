@@ -15,88 +15,32 @@ This repository contains a Node.js application that simplifies the retrieval and
 
 The following API endpoints are available:
 
-- `/api/v1/info`:
-  - Description: Returns general information about the current state of the data processor.
-  - Response: Includes the processed block number, current epoch timestamp, and event counts for Deposit, Withdraw, and Transfer.
+- `/stats`: (HTML) Provides information about veVARA and VARA oracle price.
+- `/api/v1/stats`: (JSON) Provides information about veVARA and VARA oracle price.
+- `/api/v1/price/0x7d8100072ba0e4da8dc6bd258859a5dc1a452e05`: (JSON) Provides price information from a pool.
+- `/api/v1/info`: (JSON) Returns information about the ve-api service, such as block and data counts.
+- `/info`: (HTML) Returns information about the ve-API service, such as block and data counts.
+- `/api/v1/deposit/0`: (JSON) Returns information about each deposit in the specified epoch (0 refers to the last epoch).
+- `/api/v1/withdraw/0`: (JSON) Returns information about each withdrawal in the specified epoch (0 refers to the last epoch).
+- `/api/v1/transfer/0`: (JSON) Returns information about each transfer in the specified epoch (0 refers to the last epoch).
+- `/api/v1/all/0`: (JSON) Returns information about all transactions in the contract.
 
-- `/api/v1/oracle`:
-  - Description: Retrieves data from a hypothetical oracle contract.
-  - Response: Contains information such as price, circulating supply, market cap, and more.
+### Navigation
 
-- `/api/v1/veapi`:
-  - Description: Fetches information from a VE (Voting Escrow) API contract.
-  - Response: Provides details like timestamp, price, circulating supply, liquidity, etc.
+- `limit`: Used to determine the number of results to return (e.g., `?limit=10000`).
+- `offset`: Used to navigate through the results (e.g., `?offset=0` returns the first 10,000 results, `?offset=1` returns results from 10,001 to 20,000).
+- `epoch`: Used to filter data by epoch number (e.g., `?epoch=10` to get data from epoch 10).
 
-- `/api/v1/deposit/:epoch`:
-  - Description: Returns Deposit events that occurred in the specified epoch.
-  - Parameters:
-    - `epoch`: The epoch number to filter the Deposit events.
-  - Query Filters: You can apply query filters using the `q` parameter to customize the data retrieval based on specific criteria. Supported filter rules include the field, operand, and value.
-  - Example: Retrieve Deposit events for epoch 13, filtered by address:
-    ```
-    GET /api/v1/deposit/13?q[address][is]=0xAf79312EB821871208ac76A80c8E282f8796964e
-    ```
-    
-- `/api/v1/withdraw/:epoch`:
-  - Description: Returns Withdraw events that occurred in the specified epoch.
-  - Parameters:
-    - `epoch`: The epoch number to filter the Withdraw events.
-  - Query Filters: Similar to the Deposit endpoint, you can apply query filters to further customize the data retrieval.
-  - Example: Retrieve Withdraw events for epoch 13, filtered by provider:
-    ```
-    GET /api/v1/withdraw/13?q[provider][is]=0xAf79312EB821871208ac76A80c8E282f8796964e
-    ```
+### Advanced Filters
 
-- `/api/v1/transfer/:epoch`:
-  - Description: Returns Transfer events that occurred in the specified epoch.
-  - Parameters:
-    - `epoch`: The epoch number to filter the Transfer events.
-  - Query Filters: Similar to the Deposit and Withdraw endpoints, you can apply query filters to further customize the data retrieval.
-  - Example: Retrieve Transfer events for epoch 13, filtered by tokenId:
-    ```
-    GET /api/v1/transfer/13?q[tokenId][gt]=100
-    ```
+You can apply advanced filters to customize the data retrieval based on specific criteria. The filter follows the format `?q[field][operand]=value`, and you can pass multiple filters by including multiple `q` parameters in the URL.
 
-- `/api/v1/all/:epoch`:
-  - Description: Aggregates Deposit, Withdraw, and Transfer events for a specific epoch.
-  - Parameters:
-    - `epoch`: The epoch number to filter the events.
-  - Query Filters: Similar to the previous endpoints, you can apply query filters to further customize the data retrieval.
-  - Example: Retrieve all events for epoch 13, filtered by address:
-    ```
-    GET /api/v1/all/13?q[address][is]=0xAf79312EB821871208ac76A80c8E282f8796964e
-    ```
+Examples:
+- `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]`: Filters all data by address.
+- `?q[days][gt][1000]`: Filters all data by the `days` field greater than 1000 days.
+- Multiple filters: `?q[address][eq][0xAf79312EB821871208ac76A80c8E282f8796964e]&q[days][gt][1000]` combines the two filters mentioned above.
 
-- `/api/v1/nftByAddress/:address`:
-  - Description: Retrieves all NFTs held by a given Ethereum address.
-  - Parameters:
-    - `address`: The Ethereum address to filter the NFTs.
-  - Query Filters: You can apply query filters to further customize the data retrieval.
-  - Example: Retrieve NFTs held by a specific address, filtered by tokenId:
-    ```
-    GET /api/v1/nftByAddress/0xAf79312EB821871208ac76A80c8E282f8796964e?q[tokenId][gt]=100
-    ```
-
-- `/api/v1/allHoldersBalance`:
-  - Description: Provides balance information for all token holders.
-  - Query Filters: You can apply query filters to further customize the data retrieval.
-  - Example: Retrieve balance information for all token holders, filtered by veAmount:
-    ```
-    GET /api/v1/allHoldersBalance?q[veAmount][gte]=1000
-    ```
-
-- `/api/v1/gaugeInfo`:
-  - Description: Returns a detailed summary of all pool gauges, including their addresses, symbols, and fees.
-
-- `/api/v1/gauges`:
-  - Description: Retrieves the current list of pool gauges.
-  
-```
-You can apply various filter rules using the query-query module, which offers a flexible and powerful way to filter data. The available filter rules can be found in the [array-query](https://github.com/jacwright/array-query) documentation.
-
-By utilizing these filter rules, you have the ability to refine your data retrieval based on specific criteria, making the API endpoints highly customizable and adaptable to your needs. This allows for more efficient and targeted data retrieval, ensuring you get the information you require.
-```
-
+For more information about the available filter operands, please refer to the [array-query documentation](https://github.com/jacwright/array-query).
 ## Dependencies
 
 The project relies on the following dependencies:
