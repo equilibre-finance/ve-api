@@ -20,7 +20,7 @@ let redis;
 
 const cors = require('cors');
 
-
+const { query } = require("array-query");
 
 process.on('uncaughtException', function (err) {
     console.error(err);
@@ -397,18 +397,19 @@ function byKey(key) {
     };
 }
 
-function filter(array, params, query) {
+function filter(array, params, q) {
+    const ignore = ['offset', 'limit', 'epoch', 'orderBy', 'sortBy'];
     array = array || [];
 
     if( array.length === 0 ) return array;
 
     let epoch = parseInt(params.epoch > 0 ?
         params.epoch :
-        query.epoch > 0 ? query.epoch : epochNumber
+        q.epoch > 0 ? q.epoch : epochNumber
     );
 
-    const offset = query.offset ? parseInt(query.offset) : 0;
-    const limit = query.limit ? parseInt(query.limit) : 10_000;
+    const offset = q.offset ? parseInt(q.offset) : 0;
+    const limit = q.limit ? parseInt(q.limit) : 10_000;
 
     // first filter all data by epoch:
     if( epoch > 0 ){
@@ -417,9 +418,26 @@ function filter(array, params, query) {
         });
     }
 
+    console.log(`q`, q.q);
+    if( q.q ) {
+        // q { address: { eq: '0xAf79312EB821871208ac76A80c8E282f8796964e' } }
+        query("age").gt(20).on(array);
+        for(const field in q.q){
+            for( const operand in q.q[field] ) {
+                const value = q.q[field][operand];
+                const total = array.length;
+                // const firstJacob = query("firstName").is("Jacob").first(users);
+                array = query(field)[`${operand}`](value).on(array);
+                //array = query(field).is(value).on(array);
+                console.log(`query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
+            }
+        }
+    }
+
+
     // sort and order before apply limit and offset:
-    if (query.orderBy && query.sortBy) {
-        array = _.orderBy(array, byKey(query.sortBy), [query.orderBy]);
+    if (q.orderBy && q.sortBy) {
+        array = _.orderBy(array, byKey(q.sortBy), [q.orderBy]);
     }
 
     // now apply offset:
