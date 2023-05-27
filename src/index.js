@@ -389,6 +389,45 @@ function w2c(num) {
     num = parseFloat(fromWei(num));
     return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
 }
+
+function byKey(key) {
+    return function (o) {
+        const v = parseInt(o[key], 10);
+        return isNaN(v) ? o[key] : v;
+    };
+}
+
+function filter(array, params, query) {
+    array = array || [];
+
+    if( array.length === 0 ) return array;
+
+    let epoch = parseInt(params.epoch > 0 ?
+        params.epoch :
+        query.epoch > 0 ? query.epoch : epochNumber
+    );
+
+    const offset = query.offset ? parseInt(query.offset) : 0;
+    const limit = query.limit ? parseInt(query.limit) : 10_000;
+
+    // first filter all data by epoch:
+    if( epoch > 0 ){
+        array = array.filter(function(o){
+            return o.epochNumber === epoch;
+        });
+    }
+
+    // sort and order before apply limit and offset:
+    if (query.orderBy && query.sortBy) {
+        array = _.orderBy(array, byKey(query.sortBy), [query.orderBy]);
+    }
+
+    // now apply offset:
+    array = array.slice(offset, offset + limit);
+    return array;
+}
+
+
 async function main() {
     await cache_init();
 
@@ -431,7 +470,7 @@ async function main() {
     });
 
     app.get('/', async (req, res) => {
-        res(await getInfo());
+        res.json( await getInfo() );
     })
 
     app.get('/info', async (req, res) => {
@@ -459,41 +498,28 @@ async function main() {
     })
 
     app.get('/api/v1/deposit/:epoch', (req, res) => {
-        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res(Deposit.filter((r) => {
-            return r.epochNumber === argEpoch
-        }));
+        res.json( filter(Deposit, req.params, req.query) );
     })
     app.get('/api/v1/withdraw/:epoch', (req, res) => {
-        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res(Withdraw.filter((r) => {
-            return r.epochNumber === argEpoch
-        }));
+        res.json( filter(Withdraw, req.params, req.query) );
     })
 
     app.get('/api/v1/transfer/:epoch', (req, res) => {
-        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res(Transfer.filter((r) => {
-            return r.epochNumber === argEpoch
-        }));
+        res.json( filter(Transfer, req.params, req.query) );
     })
 
     app.get('/api/v1/all/:epoch', (req, res) => {
-        const argEpoch = parseInt(req.params.epoch > 0 ? req.params.epoch : epochNumber);
-        res(allData.filter((r) => {
-            return r.epochNumber === argEpoch
-        }));
+        res.json( filter(allData, req.params, req.query) );
     })
 
     app.get('/api/v1/nftByAddress/:address', (req, res) => {
         const address = req.params.address;
-        res(nftByAddress[address] ? nftByAddress[address] : []);
+        let list = nftByAddress[address] ? nftByAddress[address] : [];
+        res.json( filter(list, req.params, req.query) );
     })
 
     app.get('/api/v1/allHoldersBalance', async (req, res) => {
-        let sortBy = req.query.sortBy ? req.query.sortBy : 'tokenId';
-        let orderBy = req.query.orderBy ? req.query.orderBy : 'asc';
-        res(_.orderBy(holderInfo, byKey(sortBy), [orderBy]));
+        res.json( filter(holderInfo, req.params, req.query) );
     })
 
     app.get('/api/v1/gaugeInfo', async (req, res) => {
@@ -516,23 +542,20 @@ async function main() {
     })
 
     app.get('/api/v1/gauges', async (req, res) => {
-        res(Gauges);
+        res.json( filter(Gauges, req.params, req.query) );
     })
 
-
-    app.listen(port, () => {
-        console.log(`- HTTP ${port}`)
+    app.listen(port, async () => {
+        console.log(`- HTTP ${port}`);
+        console.log(`- RPC: ${process.env.RPC}`);
+        await loadData();
+        exec_gauge_info();
+        exec_holder_info();
+        setInterval(exec_holder_info, ONE_MINUTE);
+        setInterval(exec_gauge_info, ONE_HOUR);
+        processEvents();
+        setInterval(processEvents, ONE_MINUTE);
     })
-
-    console.log(`- RPC: ${process.env.RPC}`);
-
-    await loadData();
-    exec_gauge_info();
-    exec_holder_info();
-    setInterval(exec_holder_info, ONE_MINUTE);
-    setInterval(exec_gauge_info, ONE_HOUR);
-    processEvents();
-    setInterval(processEvents, ONE_MINUTE);
 }
 
 async function getInfo() {
@@ -597,13 +620,6 @@ async function getOracleInfo() {
         lockedMarketCap: info[14]
     };
 
-}
-
-function byKey(key) {
-    return function (o) {
-        const v = parseInt(o[key], 10);
-        return isNaN(v) ? o[key] : v;
-    };
 }
 
 function Call(method) {
