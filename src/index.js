@@ -398,6 +398,11 @@ function byKey(key) {
 }
 
 function filter(array, params, q) {
+    const debug = !!q.debug;
+    if(debug){
+        console.log('debug array 1', array.length, params, q);
+        console.log('array[0]', array[0]);
+    }
     const ignore = ['offset', 'limit', 'epoch', 'orderBy', 'sortBy'];
     array = array || [];
 
@@ -412,16 +417,16 @@ function filter(array, params, q) {
     const limit = q.limit ? parseInt(q.limit) : 10_000;
 
     // first filter all data by epoch:
-    if( epoch > 0 ){
+    if( epoch > 0 && array && array.length > 0 && array[0].hasOwnProperty('epochNumber') ){
         array = array.filter(function(o){
             return o.epochNumber === epoch;
         });
     }
 
-    console.log(`q`, q.q);
+    //console.log(`q`, q.q);
     if( q.q ) {
         // q { address: { eq: '0xAf79312EB821871208ac76A80c8E282f8796964e' } }
-        query("age").gt(20).on(array);
+        //query("age").gt(20).on(array);
         for(const field in q.q){
             for( const operand in q.q[field] ) {
                 const value = q.q[field][operand];
@@ -429,7 +434,7 @@ function filter(array, params, q) {
                 // const firstJacob = query("firstName").is("Jacob").first(users);
                 array = query(field)[`${operand}`](value).on(array);
                 //array = query(field).is(value).on(array);
-                console.log(`query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
+                if(debug) console.log(`debug query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
             }
         }
     }
@@ -442,6 +447,7 @@ function filter(array, params, q) {
 
     // now apply offset:
     array = array.slice(offset, offset + limit);
+    if(debug) console.log('debug array 2', array.length);
     return array;
 }
 
@@ -487,9 +493,13 @@ async function main() {
         res.json(poolInfo);
     });
 
-    app.get('/', async (req, res) => {
+    app.get('/api/v1/info', async (req, res) => {
         res.json( await getInfo() );
     })
+
+    app.get('/', async (req, res) => {
+        res.json( await getInfo() );
+    });
 
     app.get('/info', async (req, res) => {
         const stats = await getInfo();
