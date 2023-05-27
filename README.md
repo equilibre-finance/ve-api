@@ -15,11 +15,11 @@ This repository contains a Node.js application that simplifies the retrieval and
 
 The following API endpoints are available:
 
-- `/stats`: (HTML) Provides information about ve and vara oracle price.
-- `/api/v1/stats`: (JSON) Provides information about ve and vara oracle price.
+- `/stats`: (HTML) Provides information about veVARA and VARA oracle price.
+- `/api/v1/stats`: (JSON) Provides information about veVARA and VARA oracle price.
 - `/api/v1/price/0x7d8100072ba0e4da8dc6bd258859a5dc1a452e05`: (JSON) Provides price information from a pool.
 - `/api/v1/info`: (JSON) Returns information about the ve-api service, such as block and data counts.
-- `/info`: (HTML) Returns information about the ve-api service, such as block and data counts.
+- `/info`: (HTML) Returns information about the ve-API service, such as block and data counts.
 - `/api/v1/deposit/0`: (JSON) Returns information about each deposit in the specified epoch (0 refers to the last epoch).
 - `/api/v1/withdraw/0`: (JSON) Returns information about each withdrawal in the specified epoch (0 refers to the last epoch).
 - `/api/v1/transfer/0`: (JSON) Returns information about each transfer in the specified epoch (0 refers to the last epoch).
