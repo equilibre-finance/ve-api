@@ -13,6 +13,9 @@ const express = require('express')
 const Web3 = require('web3');
 
 const web3_utils = new Web3(process.env.RPC);
+let web3 = new Web3(process.env.RPC);
+
+
 const {_} = require('lodash');
 
 const Redis = require('redis');
@@ -54,6 +57,12 @@ const abiMulticall = JSON.parse(fs.readFileSync("./multicall-abi.js", "utf8"));
 const abiOracle = JSON.parse(fs.readFileSync("./oracle-abi.js", "utf8"));
 const abiVeApi3 = JSON.parse(fs.readFileSync("./veapi-abi.js", "utf8"));
 
+const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
+const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
+const veApi = new web3_utils.eth.Contract(abiVeApi3, veapiAddress);
+const oracle = new web3_utils.eth.Contract(abiOracle, oracleAddress);
+const voter = new web3.eth.Contract(abiVoter, voterAddress);
+
 const YEAR = 365;
 const DAY = 86400;
 const FACTOR = 0.25 / YEAR;
@@ -77,9 +86,7 @@ async function loadData() {
     // this timestamp is the contract deployment date: 2021-02-19T00:00:10.000Z
     startEpoch = parseInt(getEpochStart(startBlockTimestamp));
 
-    const r = await get(`Config`,
-        {"startBlockNumber": startBlockNumber, "epochNumber": 0, "epoch": 0}
-    );
+    const r = await get(`Config`, {"startBlockNumber": startBlockNumber, "epochNumber": 0, "epoch": 0} );
     startBlockNumber = parseInt(r.startBlockNumber);
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
@@ -88,8 +95,19 @@ async function loadData() {
     Withdraw = await get(`Withdraw`, []);
     Transfer = await get(`Transfer`, []);
     allData = await get(`allData`, []);
-    nftByAddress = await get(`nftByAddress`, []);
+    nftByAddress = await get(`nftByAddress`, {});
     POOL = await get(`POOL`, []);
+
+    console.log(`---------------------------------------------------------------`)
+    console.log(`Config:`, r);
+    console.log(`Deposit:`, Deposit.length);
+    console.log(`Withdraw:`, Withdraw.length);
+    console.log(`Transfer:`, Transfer.length);
+    console.log(`allData:`, allData.length);
+    console.log(`nftByAddress:`, Object.keys(nftByAddress).length);
+    console.log(`POOL:`, POOL.length);
+    console.log(`---------------------------------------------------------------`)
+
 }
 
 async function saveData() {
@@ -106,6 +124,8 @@ async function saveData() {
     await set(`nftByAddress`, nftByAddress);
     await set(`allData`, allData);
     await set(`POOL`, POOL);
+    // print stats count about each type of event:
+    console.log(`Deposit: ${Deposit.length}, Withdraw: ${Withdraw.length}, Transfer: ${Transfer.length}, allData: ${allData.length}, nftByAddress: ${Object.keys(nftByAddress).length}, POOL: ${POOL.length}`);
 }
 
 function computeVeVARA(amount, locktime, ts) {
@@ -175,23 +195,32 @@ async function saveWithdraw(e, blockInfo, provider, tokenId, value) {
     });
 }
 
+function saveNftByAddress(address, tokenId, type) {
+    if (!nftByAddress[address]) {
+        nftByAddress[address] = [];
+    }
+
+    if (type === 'Mint') {
+        if( !nftByAddress[address].includes(tokenId) )
+            nftByAddress[address].push(tokenId);
+    }else if (type === 'Burn') {
+        nftByAddress[address].splice(nftByAddress[address].indexOf(tokenId), 1);
+    }
+    //console.log(`saveNftByAddress ${type}: ${address} #${tokenId} (${nftByAddress[address].length}})`);
+}
+
 async function saveTransfer(e, blockInfo, from, to, tokenId) {
     let type;
-    if (!nftByAddress[from]) nftByAddress[from] = [];
-    if (!nftByAddress[to]) nftByAddress[to] = [];
     if (from === '0x0000000000000000000000000000000000000000') {
         type = 'Mint';
-        //console.log(`\t@${epochNumber} ${type}: ${to} #${tokenId}`);
-        nftByAddress[to].push(tokenId);
+        saveNftByAddress(to, tokenId, 'Mint');
     } else if (to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
-        //console.log(`\t@${epochNumber} ${type}: ${from} #${tokenId}`);
-        nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId), 1);
+        saveNftByAddress(from, tokenId, 'Burn');
     } else {
         type = 'Transfer';
-        nftByAddress[from].splice(nftByAddress[from].indexOf(tokenId));
-        nftByAddress[to].push(tokenId);
-        //console.log(`\t@${epochNumber} ${type}: ${from}->${to} #${tokenId}`);
+        saveNftByAddress(from, tokenId, 'Burn');
+        saveNftByAddress(to, tokenId, 'Mint');
     }
     Transfer.push({
         blockTimestamp: blockInfo.timestamp,
@@ -214,56 +243,42 @@ const SEVEN_DAYS = 7 * ONE_DAY;
 function _bribeStart(timestamp) {
     return timestamp - (timestamp % SEVEN_DAYS);
 }
-
+function pushAllData(e) {
+    allData.push({
+        epochNumber: epochNumber,
+        tx: e.transactionHash,
+        block: e.blockNumber,
+        event: e.event,
+        returnValues: e.returnValues
+    });
+}
+function pushTxToPool(tx) {
+    if (POOL.indexOf(tx) !== -1) return;
+    POOL.push(tx);
+}
 async function getPastEvents(args) {
     try {
-        const web3 = new Web3(process.env.RPC);
-        const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
         const events = await votingEscrow.getPastEvents(args);
         for (let j = 0; j < events.length; j++) {
             const e = events[j];
             if (!e.event) continue;
-            const txid = `${e.transactionHash}-${j}`;
-            if (POOL.indexOf(txid) !== -1) {
-                console.log(`FOUND: TX=${txid} blockNumber=${e.blockNumber}`, args);
-                continue;
-            }
-            POOL.push(txid);
+            const txId = `${e.transactionHash}-${j}`;
+            pushTxToPool(txId);
             const u = e.returnValues;
             if (e.event === 'Deposit') {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
-                // console.log('e', e);
-                // console.log('blockInfo', blockInfo);
-                allData.push({
-                    epoch: epoch,
-                    tx: e.transactionHash,
-                    block: e.blockNumber,
-                    event: e.event,
-                    returnValues: e.returnValues
-                });
+                pushAllData(e);
                 await saveDeposit(votingEscrow, e, blockInfo, u.provider, u.tokenId, u.value, u.locktime, u.deposit_type, u.ts);
             } else if (e.event === 'Withdraw') {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
-                allData.push({
-                    epoch: epoch,
-                    tx: e.transactionHash,
-                    block: e.blockNumber,
-                    event: e.event,
-                    returnValues: e.returnValues
-                });
+                pushAllData(e);
                 await saveWithdraw(e, blockInfo, u.provider, u.tokenId, u.value);
             } else if (e.event === 'Transfer') {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
-                allData.push({
-                    epoch: epoch,
-                    tx: e.transactionHash,
-                    block: e.blockNumber,
-                    event: e.event,
-                    returnValues: e.returnValues
-                });
+                pushAllData(e);
                 await saveTransfer(e, blockInfo, u.from, u.to, u.tokenId);
             }
         }
@@ -292,7 +307,6 @@ async function processEvents() {
         return;
     }
     running = true;
-    let web3 = new Web3(process.env.RPC);
     let size = 1000
     const blocks = parseInt(startBlockNumber) + parseInt(size);
     let latest;
@@ -541,13 +555,15 @@ async function main() {
     })
 
     app.get('/api/v1/nftByAddress/:address', (req, res) => {
-        const address = req.params.address;
-        let list = nftByAddress[address] ? nftByAddress[address] : [];
-        res.json( filter(list, req.params, req.query) );
+        //console.log('nftByAddress', nftByAddress)
+        res.json(
+            nftByAddress[req.params.address] ?
+            nftByAddress[req.params.address] : []
+        );
     })
 
     app.get('/api/v1/allHoldersBalance', async (req, res) => {
-        res.json( filter(holderInfo, req.params, req.query) );
+        res.json( holderInfo );
     })
 
     app.get('/api/v1/gaugeInfo', async (req, res) => {
@@ -620,7 +636,6 @@ async function getInfo() {
 }
 
 async function getPoolInfo(poolAddress){
-    const oracle = new web3_utils.eth.Contract(abiOracle, oracleAddress);
     const price = await oracle.methods.p_t_coin_usd(poolAddress).call();
     return {price: price};
 }
@@ -628,7 +643,6 @@ async function getPoolInfo(poolAddress){
 async function getOracleInfo() {
     // initialize contracts
 
-    const veApi = new web3_utils.eth.Contract(abiVeApi3, veapiAddress);
     const info = await veApi.methods.info().call();
     return {
         timestamp: info[0],
@@ -660,8 +674,7 @@ function Call(method) {
 }
 
 async function exec_holder_info() {
-    const web3 = new Web3(process.env.RPC);
-    const votingEscrow = new web3.eth.Contract(abiVe, veAddress);
+    console.log(`exec_holder_info nftByAddress: ${Object.keys(nftByAddress).length}`);
     let calls = [], addresses = [];
     for (let address in nftByAddress) {
         for (let i in nftByAddress[address]) {
@@ -680,6 +693,7 @@ async function exec_holder_info() {
     }
     const ts = parseInt(new Date().getTime() / 1000);
     const r = await MULTICALL(calls);
+    console.log(`exec_holder_info r: ${r.length}`);
     let balances = [];
     let stats = {veAmount: 0, tokensAmount: 0};
     for (let i in r) {
@@ -688,7 +702,7 @@ async function exec_holder_info() {
         if (amount > 0 && ve > 0 && days > 0) {
             balances.push({
                 tokenId: addresses[i].tokenId,
-                owner: addresses[i].address,
+                owner: addresses[i].owner,
                 tokenAmount: amount,
                 veAmount: ve,
                 endDate: date,
@@ -721,8 +735,6 @@ async function MULTICALL(calls, abi) {
             l++;
         }
         await new Promise(resolve => setTimeout(resolve, 1000));
-        const web3 = new Web3(process.env.RPC);
-        const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
         const _results = await cmd(multicall.methods.aggregate(_calls));
         results = results.concat(_results[1]);
         j += limit;
@@ -739,21 +751,13 @@ async function MULTICALL(calls, abi) {
 }
 
 async function exec_gauge_info() {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const web3 = new Web3(process.env.RPC);
-    const voter = new web3.eth.Contract(abiVoter, voterAddress);
-
     let lines = [];
     const length = await cmd(voter.methods.length());
-
     let getPoolsAddresses = [], getGaugeAddress = [];
     for (let i = 0; i < length; ++i) {
         getPoolsAddresses.push(Call(voter.methods.pools(i)));
     }
-
     getPoolsAddresses = await MULTICALL(getPoolsAddresses, ['address']);
-
-
     for (let i = 0; i < length; ++i) {
         getGaugeAddress.push(Call(voter.methods.gauges(getPoolsAddresses[i])));
     }
