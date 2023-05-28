@@ -499,7 +499,7 @@ async function main() {
     await cache_init();
 
     const app = express()
-    app.use(cors())
+    app.options('*', cors()) // include before other routes
     const port = process.env.HTTP_PORT
 
     app.get('/stats', async (req, res) => {
