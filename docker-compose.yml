@@ -17,6 +17,10 @@ services:
       - traefik.http.routers.ve-api.entryPoints=https
       - traefik.http.services.ve-api.loadbalancer.server.port=8381
       - traefik.docker.network=common_traefik
+      - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.middlewares.cors.headers.accesscontrolmaxage=100"
+      - "traefik.http.middlewares.cors.headers.addvaryheader=true"
     ports:
       - "8381:8381/tcp"
     depends_on:
