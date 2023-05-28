@@ -148,6 +148,8 @@ function computeVeVARA(amount, locktime, ts) {
 
 
 function getVeStats(value, locktime, ts) {
+    value = value ? value : 0;
+    locktime = locktime ? locktime : 0;
     locktime = parseInt(locktime);
     ts = parseInt(ts);
     let amount = parseFloat(fromWei(value));
@@ -156,7 +158,20 @@ function getVeStats(value, locktime, ts) {
     const date = new Date(ts * 1000).toISOString();
     return {amount, ve, days, date};
 }
-
+async function getLockedInfo(e, tokenId){
+    /*
+    struct LockedBalance {
+        int128 amount;
+        uint end;
+    }
+    */
+    try {
+        return await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber);
+    }catch (e) {
+        console.log(`getLockedInfo error tokenId=${tokenId}: ${e.message}`)
+        return {amount: 0, end: 0};
+    }
+}
 async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value, locktime, deposit_type, ts) {
     deposit_type = parseInt(deposit_type);
     let type = 'DEPOSIT';
@@ -165,7 +180,7 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
     if (deposit_type === 3) type = 'INCREASE_UNLOCK_TIME';
     if (deposit_type === 4) type = 'MERGE_TYPE';
     if (!locktime || parseInt(locktime) === 0) {
-        const LockedBalanceAtBlock = await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber);
+        const LockedBalanceAtBlock = await getLockedInfo(e, tokenId);
         locktime = LockedBalanceAtBlock.end;
     }
 
@@ -220,11 +235,12 @@ function saveNftByAddress(address, tokenId, type) {
 }
 
 async function saveTransfer(e, blockInfo, from, to, tokenId) {
-    let type, valueInWei = 0;
+    let type;
+    const {amount, end} = await getLockedInfo(e, tokenId);
+    const {valueInDecimal, ve, days, date} = getVeStats(amount, end, blockInfo.timestamp);
     if (from === '0x0000000000000000000000000000000000000000') {
         type = 'Mint';
         saveNftByAddress(to, tokenId, 'Mint');
-        valueInWei = (await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber)).toString();
     } else if (to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
         saveNftByAddress(from, tokenId, 'Burn');
@@ -232,7 +248,6 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
         type = 'Transfer';
         saveNftByAddress(from, tokenId, 'Burn');
         saveNftByAddress(to, tokenId, 'Mint');
-        valueInWei = (await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber)).toString();
     }
 
     Transfer.push({
@@ -244,8 +259,13 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
         from: from,
         to: to,
         tokenId: tokenId,
-        valueInWei: valueInWei,
-        valueInDecimal: parseFloat(fromWei(valueInWei)),
+        valueInWei: amount,
+        valueInDecimal: valueInDecimal,
+        ve: ve,
+        days: days,
+        date: date,
+        locktime: end,
+        ts: blockInfo.timestamp,
         tx: e.transactionHash
     });
 }
@@ -299,7 +319,7 @@ async function getPastEvents(args) {
         }
         return true;
     } catch (e) {
-        console.log('getPastEvents', args, e.toString());
+        console.log('getPastEvents', e);
         return false;
     }
 }
