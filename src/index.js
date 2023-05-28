@@ -87,6 +87,7 @@ function getEpoch(blockInfo) {
     startBlockTimestamp = blockInfo.timestamp;
     const currentEpoch = parseInt(getEpochStart(startBlockTimestamp));
     epochNumber = parseInt((currentEpoch - startEpoch) / SEVEN_DAYS);
+    epoch = epochNumber;
     return epochNumber;
 }
 
@@ -190,9 +191,9 @@ async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value,
 }
 
 async function saveWithdraw(e, blockInfo, provider, tokenId, value) {
-    const amount = parseFloat(web3_utils.utils.fromWei(value));
+    const amount = parseFloat(fromWei(value));
     //console.log(`\t@${epochNumber} Withdraw: ${provider} ${amount} #${tokenId}`);
-    Deposit.push({
+    Withdraw.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
         epochNumber: epochNumber,
@@ -219,10 +220,11 @@ function saveNftByAddress(address, tokenId, type) {
 }
 
 async function saveTransfer(e, blockInfo, from, to, tokenId) {
-    let type;
+    let type, valueInWei = 0;
     if (from === '0x0000000000000000000000000000000000000000') {
         type = 'Mint';
         saveNftByAddress(to, tokenId, 'Mint');
+        valueInWei = (await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber)).toString();
     } else if (to === '0x0000000000000000000000000000000000000000') {
         type = 'Burn';
         saveNftByAddress(from, tokenId, 'Burn');
@@ -230,7 +232,9 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
         type = 'Transfer';
         saveNftByAddress(from, tokenId, 'Burn');
         saveNftByAddress(to, tokenId, 'Mint');
+        valueInWei = (await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber)).toString();
     }
+
     Transfer.push({
         blockTimestamp: blockInfo.timestamp,
         blockNumber: e.blockNumber,
@@ -240,6 +244,8 @@ async function saveTransfer(e, blockInfo, from, to, tokenId) {
         from: from,
         to: to,
         tokenId: tokenId,
+        valueInWei: valueInWei,
+        valueInDecimal: parseFloat(fromWei(valueInWei)),
         tx: e.transactionHash
     });
 }
