@@ -499,10 +499,10 @@ async function main() {
     await cache_init();
 
     const app = express()
-    app.options('*', cors()) // include before other routes
+    app.use(cors());
     app.disable('x-powered-by');
     app.use(function(req, res, next) {
-        res.header('X-XSS-Protection', 0);
+        res.header('X-Powered-By', 't.me/bitdeep');
         next();
     });
     const port = process.env.HTTP_PORT
