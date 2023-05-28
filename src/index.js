@@ -500,6 +500,11 @@ async function main() {
 
     const app = express()
     app.options('*', cors()) // include before other routes
+    app.disable('x-powered-by');
+    app.use(function(req, res, next) {
+        res.header('X-XSS-Protection', 0);
+        next();
+    });
     const port = process.env.HTTP_PORT
 
     app.get('/stats', async (req, res) => {
