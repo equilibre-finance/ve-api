@@ -334,6 +334,10 @@ async function processEvents() {
             processEventRetryLastEvent = startBlockNumber;
         } else if (processEventRetryLastEvent == startBlockNumber) {
             ++processEventRetryCount;
+            if( processEventRetryCount >= 100 ){
+                console.log(`\t--ERROR: RETRY COUNT EXCEEDED, EXITING... --`);
+                process.exit(0);
+            }
         } else {
             processEventRetryLastEvent = startBlockNumber;
             processEventRetryCount = 0;
