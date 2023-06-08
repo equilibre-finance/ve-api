@@ -471,16 +471,17 @@ function filter(array, params, q) {
     }
 
     //console.log(`q`, q.q);
+    // /api/v1/deposit/15?q[tx][is]=0x22c84226107503fb0d4a5370135535c70df1eb1e189e697fa805a92b7208b665&debug=1
     if( q.q ) {
-        // q { address: { eq: '0xAf79312EB821871208ac76A80c8E282f8796964e' } }
-        //query("age").gt(20).on(array);
+        // q { address: { eq: '0x70bf12d17a84c6adcb3b80a22613c497fd88526f' } }
+        if(debug) console.log('q', q.q);
+        if(debug) console.log(`array=${array.length}`);
         for(const field in q.q){
             for( const operand in q.q[field] ) {
                 const value = q.q[field][operand];
                 const total = array.length;
-                // const firstJacob = query("firstName").is("Jacob").first(users);
-                array = query(field)[`${operand}`](value).on(array);
-                //array = query(field).is(value).on(array);
+                console.log(`- ${field} ${operand} ${value}`);
+                array = query(field)[operand](value).on(array);
                 if(debug) console.log(`debug query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
             }
         }
