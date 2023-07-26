@@ -223,13 +223,14 @@ async function getPastEvents(args) {
         for (let j = 0; j < events.length; j++) {
             const e = events[j];
             if (!e.event) continue;
-            const txid = `${e.transactionHash}-${j}`;
-            if (POOL.indexOf(txid) !== -1) {
-                console.log(`FOUND: TX=${txid} blockNumber=${e.blockNumber}`, args);
+            const txId = `${e.transactionHash}-${j}`;
+            if ( await redis.get(txId) === true ) {
+                console.log(`FOUND: TX=${txId} blockNumber=${e.blockNumber}`, args);
                 continue;
             }
-            POOL.push(txid);
+            await redis.set(txId, true);
             const u = e.returnValues;
+
             if (e.event === 'Deposit') {
                 const blockInfo = await web3.eth.getBlock(e.blockNumber);
                 getEpoch(blockInfo);
