@@ -1,8 +1,6 @@
 FROM node:16
 WORKDIR /app
-
-COPY src /app
-COPY .env /app
-
-RUN npm install
-CMD [ "node", "index.js" ]
+COPY .env /
+ENV NODE_ENV=production
+ENV HOME=/app
+CMD [ "npm", "start" ]
