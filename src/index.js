@@ -655,8 +655,8 @@ async function main() {
         setInterval(exec_gauge_info, ONE_HOUR);
         setInterval(processEvents, ONE_MINUTE);
 
-        //exec_gauge_info();
-        //exec_holder_info();
+        exec_gauge_info();
+        exec_holder_info();
         processEvents();
     })
 }
