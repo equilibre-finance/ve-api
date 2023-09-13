@@ -19,17 +19,21 @@ const Web3 = require('web3');
 
 const web3_utils = new Web3(process.env.RPC);
 let web3 = new Web3(process.env.RPC);
-function fromWei(value){
+
+function fromWei(value) {
     return web3_utils.utils.fromWei(value.toString(), 'ether');
 }
+
 // wei to currency
 function w2c(num) {
     num = parseFloat(fromWei(num));
     return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
 }
+
 function currency(num) {
     return num.toFixed(2).replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')
 }
+
 const {_} = require('lodash');
 
 const Redis = require('redis');
@@ -37,7 +41,7 @@ let redis;
 
 const cors = require('cors');
 
-const { query } = require("array-query");
+const {query} = require("array-query");
 
 process.on('uncaughtException', function (err) {
     console.error(err);
@@ -56,6 +60,7 @@ let running = false;
 const veAddress = process.env.VE_ADDRESS;
 const multicallAddress = process.env.MULTICALL_ADDRESS;
 const voterAddress = process.env.VOTER_ADDRESS;
+const wrappedFactoryAddress = process.env.WRAPPED_FACTORY_ADDRESS;
 const oracleAddress = process.env.ORACLE_ADDRESS;
 const veapiAddress = process.env.VEAPI_ADDRESS;
 let veNftStats = {};
@@ -64,6 +69,7 @@ let Deposit = [], Withdraw = [], Transfer = [], allData = [], nftByAddress = {};
 let Gauges = [], holderInfo = [], POOL = [];
 
 const abiVoter = JSON.parse(fs.readFileSync("./voter-abi.js", "utf8"));
+const abiWrappedFactory = JSON.parse(fs.readFileSync("./wrappedFactory-abi.js", "utf8"));
 const abiPair = JSON.parse(fs.readFileSync("./pair-abi.js", "utf8"));
 const abiGauge = JSON.parse(fs.readFileSync("./gauge-abi.js", "utf8"));
 const abiVe = JSON.parse(fs.readFileSync("./voting-escrow-abi.js", "utf8"));
@@ -76,6 +82,7 @@ const multicall = new web3.eth.Contract(abiMulticall, multicallAddress);
 const veApi = new web3_utils.eth.Contract(abiVeApi3, veapiAddress);
 const oracle = new web3_utils.eth.Contract(abiOracle, oracleAddress);
 const voter = new web3.eth.Contract(abiVoter, voterAddress);
+const wrappedFactory = new web3.eth.Contract(abiWrappedFactory, wrappedFactoryAddress);
 
 const YEAR = 365;
 const DAY = 86400;
@@ -101,7 +108,7 @@ async function loadData() {
     // this timestamp is the contract deployment date: 2021-02-19T00:00:10.000Z
     startEpoch = parseInt(getEpochStart(startBlockTimestamp));
 
-    const r = await get(`Config`, {"startBlockNumber": startBlockNumber, "epochNumber": 0, "epoch": 0} );
+    const r = await get(`Config`, {"startBlockNumber": startBlockNumber, "epochNumber": 0, "epoch": 0});
     startBlockNumber = parseInt(r.startBlockNumber);
     epochNumber = parseInt(r.epochNumber);
     epoch = parseInt(r.epoch);
@@ -163,7 +170,8 @@ function getVeStats(value, locktime, ts) {
     const date = new Date(ts * 1000).toISOString();
     return {amount, ve, days, date};
 }
-async function getLockedInfo(e, tokenId){
+
+async function getLockedInfo(e, tokenId) {
     /*
     struct LockedBalance {
         int128 amount;
@@ -172,11 +180,12 @@ async function getLockedInfo(e, tokenId){
     */
     try {
         return await votingEscrow.methods.locked(tokenId).call(undefined, e.blockNumber);
-    }catch (e) {
+    } catch (e) {
         console.log(`getLockedInfo error tokenId=${tokenId}: ${e.message}`)
         return {amount: 0, end: 0};
     }
 }
+
 async function saveDeposit(votingEscrow, e, blockInfo, provider, tokenId, value, locktime, deposit_type, ts) {
     deposit_type = parseInt(deposit_type);
     let type = 'DEPOSIT';
@@ -231,9 +240,9 @@ function saveNftByAddress(address, tokenId, type) {
     }
 
     if (type === 'Mint') {
-        if( !nftByAddress[address].includes(tokenId) )
+        if (!nftByAddress[address].includes(tokenId))
             nftByAddress[address].push(tokenId);
-    }else if (type === 'Burn') {
+    } else if (type === 'Burn') {
         nftByAddress[address].splice(nftByAddress[address].indexOf(tokenId), 1);
     }
     //console.log(`saveNftByAddress ${type}: ${address} #${tokenId} (${nftByAddress[address].length}})`);
@@ -283,6 +292,7 @@ const SEVEN_DAYS = 7 * ONE_DAY;
 function _bribeStart(timestamp) {
     return timestamp - (timestamp % SEVEN_DAYS);
 }
+
 function pushAllData(e) {
     allData.push({
         epochNumber: epochNumber,
@@ -292,14 +302,16 @@ function pushAllData(e) {
         returnValues: e.returnValues
     });
 }
+
 async function checkTxToPool(txId) {
-    if ( POOL.indexOf(txId) !== -1 ) {
+    if (POOL.indexOf(txId) !== -1) {
         console.log(`FOUND: TX=${txId}`);
         return true;
     }
     POOL.push(txId);
     return false;
 }
+
 async function getPastEvents(args) {
     try {
         const events = await votingEscrow.getPastEvents(args);
@@ -307,7 +319,7 @@ async function getPastEvents(args) {
             const e = events[j];
             if (!e.event) continue;
             const txId = `${e.transactionHash}-${j}`;
-            if( await checkTxToPool(txId) === true )
+            if (await checkTxToPool(txId) === true)
                 continue;
             const u = e.returnValues;
 
@@ -339,7 +351,7 @@ let processEventRetryCount = 0, processEventRetryLastEvent = 0;
 let globalRetryCount = 0;
 
 async function processEvents() {
-    if( mutex.isLocked() ){
+    if (mutex.isLocked()) {
         console.log(`\t--ERROR: MUTEX IS LOCKED, WAITING NEXT CYCLE... --`);
         return;
     }
@@ -349,7 +361,7 @@ async function processEvents() {
             processEventRetryLastEvent = startBlockNumber;
         } else if (processEventRetryLastEvent == startBlockNumber) {
             ++processEventRetryCount;
-            if( processEventRetryCount >= 100 ){
+            if (processEventRetryCount >= 100) {
                 console.log(`\t--ERROR: RETRY COUNT EXCEEDED, EXITING... --`);
                 process.exit(0);
             }
@@ -420,7 +432,7 @@ function getPercentLeft(totalBlocks, pendingBlocks, processedBlocks) {
     return p.toFixed(4);
 }
 
-async function cache_init(){
+async function cache_init() {
     const redisConfig = {
         url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
     };
@@ -430,25 +442,26 @@ async function cache_init(){
 }
 
 async function get(key, defaultValue) {
-    try{
+    try {
         let value = await redis.get(key);
-        if( ! value ){
+        if (!value) {
             value = await set(key, defaultValue);
         }
         value = JSON.parse(value);
         //console.log('get', key, value);
         return value;
-    }catch (e){
+    } catch (e) {
         console.log('get error', key, e);
         return defaultValue;
     }
 }
+
 async function set(key, object) {
     try {
         const value = JSON.stringify(object);
         await redis.set(key, value);
         return value;
-    }catch(e){
+    } catch (e) {
         console.log('set error', key, e);
         return object;
     }
@@ -464,14 +477,14 @@ function byKey(key) {
 
 function filter(array, params, q) {
     const debug = !!q.debug;
-    if(debug){
+    if (debug) {
         console.log('debug array 1', array.length, params, q);
         console.log('array[0]', array[0]);
     }
     const ignore = ['offset', 'limit', 'epoch', 'orderBy', 'sortBy'];
     array = array || [];
 
-    if( array.length === 0 ) return array;
+    if (array.length === 0) return array;
 
     let epoch = parseInt(params.epoch > 0 ?
         params.epoch :
@@ -482,25 +495,25 @@ function filter(array, params, q) {
     const limit = q.limit ? parseInt(q.limit) : 10_000;
 
     // first filter all data by epoch:
-    if( epoch > 0 && array && array.length > 0 && array[0].hasOwnProperty('epochNumber') ){
-        array = array.filter(function(o){
+    if (epoch > 0 && array && array.length > 0 && array[0].hasOwnProperty('epochNumber')) {
+        array = array.filter(function (o) {
             return o.epochNumber === epoch;
         });
     }
 
     //console.log(`q`, q.q);
     // /api/v1/deposit/15?q[tx][is]=0x22c84226107503fb0d4a5370135535c70df1eb1e189e697fa805a92b7208b665&debug=1
-    if( q.q ) {
+    if (q.q) {
         // q { address: { eq: '0x70bf12d17a84c6adcb3b80a22613c497fd88526f' } }
-        if(debug) console.log('q', q.q);
-        if(debug) console.log(`array=${array.length}`);
-        for(const field in q.q){
-            for( const operand in q.q[field] ) {
+        if (debug) console.log('q', q.q);
+        if (debug) console.log(`array=${array.length}`);
+        for (const field in q.q) {
+            for (const operand in q.q[field]) {
                 const value = q.q[field][operand];
                 const total = array.length;
                 console.log(`- ${field} ${operand} ${value}`);
                 array = query(field)[operand](value).on(array);
-                if(debug) console.log(`debug query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
+                if (debug) console.log(`debug query("${field}").${operand}("${value}").on("${total}")=${array.length}`);
             }
         }
     }
@@ -513,7 +526,7 @@ function filter(array, params, q) {
 
     // now apply offset:
     array = array.slice(offset, offset + limit);
-    if(debug) console.log('debug array 2', array.length);
+    if (debug) console.log('debug array 2', array.length);
     return array;
 }
 
@@ -524,7 +537,7 @@ async function main() {
     const app = express()
     app.use(cors());
     app.disable('x-powered-by');
-    app.use(function(req, res, next) {
+    app.use(function (req, res, next) {
         res.header('X-Powered-By', 't.me/bitdeep');
         next();
     });
@@ -565,11 +578,11 @@ async function main() {
     });
 
     app.get('/api/v1/info', async (req, res) => {
-        res.json( await getInfo() );
+        res.json(await getInfo());
     })
 
     app.get('/', async (req, res) => {
-        res.json( await getInfo() );
+        res.json(await getInfo());
     });
 
     app.get('/info', async (req, res) => {
@@ -597,30 +610,30 @@ async function main() {
     })
 
     app.get('/api/v1/deposit/:epoch', (req, res) => {
-        res.json( filter(Deposit, req.params, req.query) );
+        res.json(filter(Deposit, req.params, req.query));
     })
     app.get('/api/v1/withdraw/:epoch', (req, res) => {
-        res.json( filter(Withdraw, req.params, req.query) );
+        res.json(filter(Withdraw, req.params, req.query));
     })
 
     app.get('/api/v1/transfer/:epoch', (req, res) => {
-        res.json( filter(Transfer, req.params, req.query) );
+        res.json(filter(Transfer, req.params, req.query));
     })
 
     app.get('/api/v1/all/:epoch', (req, res) => {
-        res.json( filter(allData, req.params, req.query) );
+        res.json(filter(allData, req.params, req.query));
     })
 
     app.get('/api/v1/nftByAddress/:address', (req, res) => {
         //console.log('nftByAddress', nftByAddress)
         res.json(
             nftByAddress[req.params.address] ?
-            nftByAddress[req.params.address] : []
+                nftByAddress[req.params.address] : []
         );
     })
 
     app.get('/api/v1/allHoldersBalance', async (req, res) => {
-        res.json( holderInfo );
+        res.json(holderInfo);
     })
 
     app.get('/api/v1/gaugeInfo', async (req, res) => {
@@ -633,17 +646,21 @@ async function main() {
             } else {
                 lines.push(` - ${i}: Gauge: ${r.gaugeAddress} ${r.symbol} [DEAD]`);
             }
+            const cssStatus = r.isAlive ? 'color:green' : 'color:red';
+            lines.push(`     Status: <span style="${cssStatus}">${r.isAlive ? 'ALIVE' : 'DEAD'}</span>`);
             lines.push(`     Pool: ${r.poolAddress}`);
             lines.push(`     Pair Fees: ${r.fees}`);
             lines.push(`     Internal Bribe: ${r.internal_bribe}`);
             lines.push(`     External Bribe: ${r.external_bribe}`);
+            lines.push(`     Wrapped Virtual Price: ${r.wrapped_external_bribe}`);
         }
+
         const html = `<pre>${lines.join('\n')}`;
         res.send(html);
     })
 
     app.get('/api/v1/gauges', async (req, res) => {
-        res.json( filter(Gauges, req.params, req.query) );
+        res.json(filter(Gauges, req.params, req.query));
     })
 
     app.listen(port, async () => {
@@ -694,7 +711,7 @@ async function getInfo() {
     };
 }
 
-async function getPoolInfo(poolAddress){
+async function getPoolInfo(poolAddress) {
     const price = await oracle.methods.p_t_coin_usd(poolAddress).call();
     return {price: price};
 }
@@ -822,7 +839,8 @@ async function exec_gauge_info() {
     }
     getGaugeAddress = await MULTICALL(getGaugeAddress, ['address']);
 
-    let getIsAlive = [], getSymbol = [], getFees = [], getInternalBribe = [], getExteranlBribe = [];
+    let getIsAlive = [], getSymbol = [], getFees = [], getInternalBribe = [], getExteranlBribe = [],
+        getWrappedExteranlBribe = [];
     for (let i = 0; i < length; ++i) {
         const poolAddress = getPoolsAddresses[i];
         const gaugeAddress = getGaugeAddress[i];
@@ -835,8 +853,6 @@ async function exec_gauge_info() {
         getFees.push(Call(pool.methods.fees()));
         getInternalBribe.push(Call(gauge.methods.internal_bribe()));
         getExteranlBribe.push(Call(gauge.methods.external_bribe()));
-
-
     }
 
     getIsAlive = await MULTICALL(getIsAlive, ['bool']);
@@ -844,6 +860,14 @@ async function exec_gauge_info() {
     getFees = await MULTICALL(getFees, ['address']);
     getInternalBribe = await MULTICALL(getInternalBribe, ['address']);
     getExteranlBribe = await MULTICALL(getExteranlBribe, ['address']);
+    // get all wrapped external bribes:
+
+    for (let i = 0; i < getExteranlBribe.length; ++i) {
+        const bribe = getExteranlBribe[i];
+        getWrappedExteranlBribe.push(Call(wrappedFactory.methods.oldBribeToNew(bribe)));
+    }
+
+    getWrappedExteranlBribe = await MULTICALL(getWrappedExteranlBribe, ['address']);
 
     for (let i = 0; i < length; ++i) {
         const poolAddress = getPoolsAddresses[i];
@@ -853,6 +877,7 @@ async function exec_gauge_info() {
         const fees = getFees[i];
         const internal_bribe = getInternalBribe[i];
         const external_bribe = getExteranlBribe[i];
+        const wrapped_external_bribe = getWrappedExteranlBribe[i];
         // console.log(`- processing gauge ${i+1} of ${length}: ${symbol}`);
         lines.push({
             index: i,
@@ -863,6 +888,7 @@ async function exec_gauge_info() {
             fees: fees,
             internal_bribe: internal_bribe,
             external_bribe: external_bribe,
+            wrapped_external_bribe: wrapped_external_bribe
         });
 
     }
