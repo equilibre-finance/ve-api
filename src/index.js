@@ -4,7 +4,8 @@ const Mutex = require('async-mutex').Mutex;
 const Semaphore = require('async-mutex').Semaphore;
 const withTimeout = require('async-mutex').withTimeout;
 const mutex = new Mutex();
-
+import * as Sentry from "@sentry/node";
+import { ProfilingIntegration } from "@sentry/profiling-node";
 const fs = require('fs');
 let envFile = '.env';
 // check if .env exits on current dir:
@@ -537,6 +538,28 @@ async function main() {
     const app = express()
     app.use(cors());
     app.disable('x-powered-by');
+
+    Sentry.init({
+        dsn: 'https://8958dc18325995a0bc71631974d0d04a@o4506163306168320.ingest.sentry.io/4506164041482240',
+        integrations: [
+            // enable HTTP calls tracing
+            new Sentry.Integrations.Http({ tracing: true }),
+            // enable Express.js middleware tracing
+            new Sentry.Integrations.Express({ app }),
+            new ProfilingIntegration(),
+        ],
+        // Performance Monitoring
+        tracesSampleRate: 1.0,
+        // Set sampling rate for profiling - this is relative to tracesSampleRate
+        profilesSampleRate: 1.0,
+    });
+
+// The request handler must be the first middleware on the app
+    app.use(Sentry.Handlers.requestHandler());
+
+// TracingHandler creates a trace for every incoming request
+    app.use(Sentry.Handlers.tracingHandler());
+
     app.use(function (req, res, next) {
         res.header('X-Powered-By', 't.me/bitdeep');
         next();
@@ -662,6 +685,18 @@ async function main() {
     app.get('/api/v1/gauges', async (req, res) => {
         res.json(filter(Gauges, req.params, req.query));
     })
+
+    // The error handler must be registered before any other error middleware and after all controllers
+    app.use(Sentry.Handlers.errorHandler());
+
+// Optional fallthrough error handler
+    app.use(function onError(err, req, res, next) {
+        // The error id is attached to `res.sentry` to be returned
+        // and optionally displayed to the user for support.
+        res.statusCode = 500;
+        res.end(res.sentry + "\n");
+    });
+
 
     app.listen(port, async () => {
         console.log(`- HTTP ${port}`);
