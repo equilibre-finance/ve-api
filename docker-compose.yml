@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: base
     image: nodejs
     container_name: ve-api
     restart: unless-stopped
