@@ -434,8 +434,9 @@ function getPercentLeft(totalBlocks, pendingBlocks, processedBlocks) {
 }
 
 async function cache_init() {
+    const redisDb = process.env.REDIS_DB || 0;
     const redisConfig = {
-        url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
+        url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}/${redisDb}`
     };
     redis = Redis.createClient(redisConfig);
     redis.on('error', err => console.log('Redis Client Error', err));
