@@ -4,6 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
+    "prod": "node index.js",
     "start": "npm install && forever -w --stack_trace_limit=50 index.js"
   },
   "dependencies": {
